@@ -14,8 +14,9 @@ export function getDb() {
   const { db: dbConfig } = getConfig();
 
   const client = postgres(dbConfig.url, {
-    max:     1,     // サーバーレスでは接続数を最小限に
-    prepare: false, // Supabase Transaction Pooler (port 6543) では必須
+    max:             1,     // サーバーレスでは接続数を最小限に
+    prepare:         false, // Supabase Transaction Pooler (port 6543) では必須
+    connect_timeout: 20,    // 接続ハング時に20秒でタイムアウト（Vercel 300s 上限まで待ち続けない）
   });
 
   _db = drizzle(client, { schema });
