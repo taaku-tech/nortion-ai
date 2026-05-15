@@ -1,0 +1,44 @@
+import { loginAction } from './actions';
+
+type Props = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function LoginPage({ searchParams }: Props) {
+  const params = await searchParams;
+  const hasError = params.error === '1';
+
+  return (
+    <main className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="bg-white rounded-lg border border-gray-200 p-8 w-full max-w-sm space-y-5">
+        <h1 className="text-xl font-bold text-gray-900">管理画面ログイン</h1>
+
+        {hasError && (
+          <p className="text-sm text-red-600">パスワードが正しくありません。</p>
+        )}
+
+        <form action={loginAction} className="space-y-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1" htmlFor="password">
+              パスワード
+            </label>
+            <input
+              id="password"
+              type="password"
+              name="password"
+              required
+              autoFocus
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+          <button
+            type="submit"
+            className="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+          >
+            ログイン
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}

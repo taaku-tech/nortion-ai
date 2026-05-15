@@ -1,4 +1,4 @@
-import { getConfig } from '@/lib/config';
+import { requireAuth } from '@/lib/auth';
 import { searchExtractions, type SearchResult } from '@/lib/queries';
 
 const TOPICS = ['デジタル化', '値上げ', '増産', '自動化', '困りごと'] as const;
@@ -12,20 +12,9 @@ function str(v: string | string[] | undefined): string {
 }
 
 export default async function SearchPage({ searchParams }: Props) {
+  await requireAuth();
+
   const params = await searchParams;
-  const key    = str(params.key);
-
-  const { admin } = getConfig();
-
-  if (key !== admin.secret) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-red-600 text-base font-medium">
-          アクセスが拒否されました。URLに ?key=ADMIN_SECRET を指定してください。
-        </p>
-      </main>
-    );
-  }
 
   const keyword      = str(params.q);
   const topic        = str(params.topic);
@@ -49,19 +38,19 @@ export default async function SearchPage({ searchParams }: Props) {
         {/* ヘッダー */}
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">検索画面</h1>
-          <a
-            href={`/admin?key=${key}`}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            ← 管理画面
-          </a>
+          <div className="flex items-center gap-4">
+            <a href="/admin" className="text-sm text-blue-600 hover:underline">
+              ← 管理画面
+            </a>
+            <a href="/logout" className="text-sm text-gray-500 hover:underline">
+              ログアウト
+            </a>
+          </div>
         </div>
 
         {/* 検索フォーム */}
         <section className="bg-white rounded-lg border border-gray-200 p-4">
           <form method="GET" className="flex flex-wrap gap-3 items-end">
-            <input type="hidden" name="key" value={key} />
-
             <div className="flex-1 min-w-48">
               <label className="block text-xs text-gray-500 mb-1">キーワード</label>
               <input

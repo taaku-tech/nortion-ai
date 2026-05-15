@@ -1,4 +1,4 @@
-import { getConfig } from '@/lib/config';
+import { requireAuth } from '@/lib/auth';
 import {
   getPageStats,
   getTopicCounts,
@@ -9,26 +9,8 @@ import {
 
 const TOPICS = ['デジタル化', '値上げ', '増産', '自動化', '困りごと'] as const;
 
-type Props = {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
-
-export default async function AdminPage({ searchParams }: Props) {
-  const params  = await searchParams;
-  const rawKey  = params.key;
-  const key     = typeof rawKey === 'string' ? rawKey : '';
-
-  const { admin } = getConfig();
-
-  if (key !== admin.secret) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-red-600 text-base font-medium">
-          アクセスが拒否されました。URLに ?key=ADMIN_SECRET を指定してください。
-        </p>
-      </main>
-    );
-  }
+export default async function AdminPage() {
+  await requireAuth();
 
   const [stats, topicCounts, customerTopics, monthlyTrend, competitorFreq] = await Promise.all([
     getPageStats(),
@@ -57,12 +39,14 @@ export default async function AdminPage({ searchParams }: Props) {
         {/* ヘッダー */}
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900">管理画面</h1>
-          <a
-            href={`/search?key=${key}`}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            検索画面 →
-          </a>
+          <div className="flex items-center gap-4">
+            <a href="/search" className="text-sm text-blue-600 hover:underline">
+              検索画面 →
+            </a>
+            <a href="/logout" className="text-sm text-gray-500 hover:underline">
+              ログアウト
+            </a>
+          </div>
         </div>
 
         {/* 全体サマリー */}
