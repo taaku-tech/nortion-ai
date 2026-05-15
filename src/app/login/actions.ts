@@ -1,13 +1,14 @@
 'use server';
 import { redirect } from 'next/navigation';
 import { setAuthCookie } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
 
 export async function loginAction(formData: FormData) {
-  const password    = formData.get('password');
-  const adminSecret = process.env.ADMIN_SECRET;
-  if (!adminSecret || typeof password !== 'string' || password !== adminSecret) {
+  const password = formData.get('password');
+  const { admin } = getConfig();
+  if (typeof password !== 'string' || password !== admin.password) {
     redirect('/login?error=1');
   }
-  await setAuthCookie(adminSecret);
+  await setAuthCookie();
   redirect('/admin');
 }

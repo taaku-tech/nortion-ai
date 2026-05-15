@@ -1,4 +1,4 @@
-import { eq, and, lt, sql } from 'drizzle-orm';
+import { eq, and, lt, sql, inArray } from 'drizzle-orm';
 import { getDb, pages, extractions } from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { fetchNotionPages, fetchPageContent } from '@/lib/notionClient';
@@ -74,6 +74,8 @@ export async function GET(req: Request): Promise<Response> {
       .values({
         pageId:         page.pageId,
         title:          page.title,
+        companyName:    page.companyName ?? undefined,
+        locationName:   page.locationName ?? undefined,
         notionDate:     page.notionDate ?? undefined,
         lastEditedTime: page.lastEditedTime,
         status:         'pending',
@@ -85,6 +87,17 @@ export async function GET(req: Request): Promise<Response> {
           title:          sql`CASE WHEN ${pages.lastEditedTime} < excluded.last_edited_time
                                 THEN excluded.title
                                 ELSE ${pages.title} END`,
+          // company_name / location_name は NULL の場合も更新（既存ページへの初回投入に対応）
+          companyName:    sql`CASE WHEN ${pages.lastEditedTime} < excluded.last_edited_time
+                                THEN excluded.company_name
+                                WHEN ${pages.companyName} IS NULL
+                                THEN excluded.company_name
+                                ELSE ${pages.companyName} END`,
+          locationName:   sql`CASE WHEN ${pages.lastEditedTime} < excluded.last_edited_time
+                                THEN excluded.location_name
+                                WHEN ${pages.locationName} IS NULL
+                                THEN excluded.location_name
+                                ELSE ${pages.locationName} END`,
           notionDate:     sql`CASE WHEN ${pages.lastEditedTime} < excluded.last_edited_time
                                 THEN excluded.notion_date
                                 ELSE ${pages.notionDate} END`,
@@ -112,8 +125,9 @@ export async function GET(req: Request): Promise<Response> {
     .limit(processing.batchSize)
     .for('update', { skipLocked: true }); // 将来の並列実行にも対応
 
-  let doneCount  = 0;
-  let errorCount = 0;
+  let doneCount    = 0;
+  let errorCount   = 0;
+  let skippedCount = 0;
 
   for (const page of targets) {
     // processing にセット（ゾンビ検出のために processing_started_at を記録）
@@ -125,6 +139,24 @@ export async function GET(req: Request): Promise<Response> {
     try {
       // 本文取得
       const { text, contentHash, contentLength } = await fetchPageContent(page.pageId);
+
+      // content_hash 一致 → skip（本文変更なし、Gemini API を呼ばない）
+      if (page.contentHash !== null && page.contentHash === contentHash && text.trim()) {
+        const [{ cnt }] = await db
+          .select({ cnt: sql<number>`count(*)::int` })
+          .from(extractions)
+          .where(and(
+            eq(extractions.pageId, page.pageId),
+            inArray(extractions.topic, [...TOPICS]),
+          ));
+
+        if (cnt === TOPICS.length) {
+          console.log('[extract] skipped unchanged page:', { pageId: page.pageId, title: page.title });
+          await db.update(pages).set({ status: 'done' }).where(eq(pages.pageId, page.pageId));
+          skippedCount++;
+          continue;
+        }
+      }
 
       // 本文なし → done（再処理不要、Gemini API を呼ばない）
       if (!text.trim()) {
@@ -178,7 +210,7 @@ export async function GET(req: Request): Promise<Response> {
       doneCount++;
 
     } catch (err) {
-      // エラーを構造化して記録（maxRetries 以下なら次回 Cron で再試行される）
+      // エラーを構造化して記録（error → pending への自動復帰なし。Notion 側で更新されるか手動リセットで再試行）
       const errorType = toErrorType(err, page.retryCount) as ErrorType;
       const errorMsg  = err instanceof Error ? err.message : String(err);
 
@@ -209,6 +241,7 @@ export async function GET(req: Request): Promise<Response> {
     synced:     notionPages.length,
     processed:  targets.length,
     done:       doneCount,
+    skipped:    skippedCount,
     error:      errorCount,
     zombieReset: zombieCount ?? 0,
     remaining,

@@ -45,9 +45,11 @@ Notion ページの取得状態・処理状態を管理する。
 | `page_id` | TEXT PK | Notion ページ ID |
 | `title` | TEXT | ページタイトル（名前プロパティ） |
 | `notion_date` | TEXT | Notion の日付プロパティ値（NOTION_DATE_PROPERTY で指定） |
+| `company_name` | TEXT | Notion の「会社名」プロパティ値 |
+| `location_name` | TEXT | Notion の「工場名・拠点名」プロパティ値 |
 | `last_edited_time` | TIMESTAMPTZ | Notion の最終編集時刻（差分検出に使用） |
 | `content` | TEXT | ページ本文テキスト（キャッシュ） |
-| `content_hash` | TEXT | SHA-256 ハッシュ（変更検出用） |
+| `content_hash` | TEXT | SHA-256 ハッシュ（保存済み・差分スキップへの活用は未実装） |
 | `content_length` | INTEGER | 本文文字数 |
 | `status` | TEXT | `pending` / `processing` / `done` / `error` |
 | `error_type` | TEXT | エラー種別（構造化） |
@@ -62,10 +64,17 @@ Notion ページの取得状態・処理状態を管理する。
 
 ```
 pending → processing → done
-                    → error  （retry_count < 3 なら次回 Cron で pending に戻る）
+                    → error  （自動復帰なし）
+processing ──────────────→ pending  （ゾンビリセット: ZOMBIE_TIMEOUT_MIN 分超過）
 ```
 
-**ゾンビ検出:** `processing_started_at` が `ZOMBIE_TIMEOUT_MIN` 分以上前のレコードを `pending` にリセット。
+**error 時の挙動:** Cron は `pending` のみを対象にする。`error` は自動的に `pending` に戻らない。
+再試行するには (a) Notion 側でページを更新して `last_edited_time` を変化させる、
+または (b) DB で手動リセット (`UPDATE SET status='pending' WHERE status='error'`) が必要。
+
+`retry_count` はエラー発生回数の記録であり、自動再試行のトリガーには使われていない。
+
+**ゾンビ検出:** `processing` のまま `ZOMBIE_TIMEOUT_MIN` 分以上経過したレコードを `pending` にリセット。
 
 ### notion_ai.extractions
 
@@ -83,6 +92,23 @@ pending → processing → done
 | `updated_at` | TIMESTAMPTZ | 更新日時（トリガー自動更新） |
 
 `(page_id, topic)` に UNIQUE 制約あり。UPSERT で冪等書き込みを保証。
+
+---
+
+## Extraction ライフサイクル図
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending : Notion同期（新規 or last_edited_time 変化）
+    pending --> processing : Cron（FOR UPDATE SKIP LOCKED）
+    processing --> done : 抽出成功
+    processing --> done : content_hash 一致 → skip（Gemini省略）
+    processing --> done : 空本文（Gemini省略）
+    processing --> error : 取得失敗 / Gemini失敗
+    processing --> pending : ゾンビリセット（ZOMBIE_TIMEOUT_MIN 超過）
+    done --> pending : Notion編集で再同期（contentHash NULL リセット）
+    error --> pending : 手動 DB リセット or Notion編集
+```
 
 ---
 
@@ -197,7 +223,34 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。
 |---------|------|
 | `/api/cron/extract` | `Authorization: Bearer {CRON_SECRET}` ヘッダー認証 |
 | `/api/health` | 認証なし（公開） |
-| `/admin`, `/search` | 未実装（TODO） |
+| `/admin`, `/admin/ops`, `/admin/customers`, `/search` | httpOnly cookie（`admin_auth`）認証。SHA-256(salt + ADMIN_SECRET) トークン。 |
+| `/login` | 公開。ADMIN_SECRET 照合後に cookie 発行。 |
+| `/logout` | cookie 削除 → `/login` リダイレクト。 |
+
+### 認証変数の責務分離
+
+| 変数 | 用途 |
+|------|------|
+| `ADMIN_PASSWORD` | `/login` フォームのパスワード照合専用 |
+| `ADMIN_SECRET` | cookie hash / session integrity 用。ログインパスワードとしては使わない |
+| `CRON_SECRET` | `/api/cron/extract` 認証専用 |
+
+### ログインパスワード変更方法
+
+ログインパスワードは `ADMIN_PASSWORD` 環境変数で管理する。
+
+**ローカル変更手順：**
+1. `.env.local` の `ADMIN_PASSWORD` を新しい値に変更
+2. dev server を再起動（`npm run dev`）
+3. ブラウザの cookie（`admin_auth`）を削除するか `/logout` してから再ログイン
+
+**本番変更手順：**
+1. Vercel ダッシュボード → Settings → Environment Variables → `ADMIN_PASSWORD` を更新
+2. 再デプロイ（Vercel は env var 変更後に手動 redeploy が必要）
+3. ブラウザの cookie を削除するか `/logout` してから再ログイン
+
+> **注意:** cookie は変更前の古い token を保持するため、パスワード変更後は必ず再ログインが必要。
+> `ADMIN_SECRET`（cookie hash）を変更した場合も全ユーザーの再ログインが必要になる。
 
 ---
 
@@ -210,8 +263,10 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。
 | `NOTION_TOKEN` | ✅ | - |
 | `NOTION_DATABASE_ID` | ✅ | - |
 | `NOTION_DATE_PROPERTY` | - | `"日付"` |
+| `NOTION_DATABASE_VIEW_URL` | - | - |
 | `GEMINI_API_KEY` | ✅ | - |
 | `CRON_SECRET` | ✅ | - |
+| `ADMIN_PASSWORD` | ✅ | - |
 | `ADMIN_SECRET` | ✅ | - |
 | `GEMINI_MODEL` | - | `gemini-2.5-flash` |
 | `BATCH_SIZE` | - | `10` |
@@ -229,6 +284,144 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。
 |---------|------|
 | `drizzle/migrations/0001_init.sql` | テーブル・インデックス・トリガー作成 |
 | `drizzle/migrations/0002_add_applicable.sql` | applicable カラム追加 |
+| `drizzle/migrations/0003_add_processed_at_index.sql` | processed_at DESC インデックス追加 |
+| `drizzle/migrations/0004_add_company_name.sql` | company_name カラム追加 |
+| `drizzle/migrations/0005_add_location_name.sql` | location_name カラム追加 |
+
+`drizzle.config.ts` は存在するが `drizzle-kit migrate` は使用しない。このファイルは `drizzle-kit studio`（DB GUI）専用。
+Migration はすべて上記 SQL ファイルを Supabase SQL Editor に手動適用する。
+
+---
+
+## DB接続設計
+
+### runtime 接続（アプリケーション）
+
+| 項目 | 設定 |
+|------|------|
+| 環境変数 | `DATABASE_URL` |
+| ポート | 6543（Supabase Transaction Pooler） |
+| `max` | 1（Vercel Serverless は接続数を最小限に） |
+| `prepare` | false（Transaction Pooler は Prepared Statement 非対応） |
+
+Vercel Serverless は各リクエストで独立プロセスが立ち上がる。接続を複数持つと Supabase 側の接続数上限を超えやすいため `max: 1`。
+Transaction Pooler はトランザクション単位で接続を割り当てるため、セッションスコープの Prepared Statement は使用不可（`prepare: false` が必須）。
+
+### migration 接続（開発時）
+
+| 項目 | 設定 |
+|------|------|
+| 環境変数 | `DATABASE_URL_DIRECT` |
+| ポート | 5432（Supabase Direct Connection） |
+| 用途 | Supabase SQL Editor での手動実行 |
+
+DDL（CREATE TABLE / CREATE INDEX）は Transaction Pooler 経由で実行すると失敗する場合があるため、Direct Connection を使用する。
+Vercel 本番環境からは不要（migration は手動実行のみ）。
+
+### 管理 UI のクエリ実行方式
+
+`/admin` ページは4つの DB クエリを **逐次実行（sequential await）** している。
+
+当初は `Promise.all` で並列実行していたが、コールド接続時に Supabase の statement timeout が頻発した。
+原因は `max: 1` 接続下で複数クエリが同時キューに積まれ、Transaction Pooler 側で接続割り当て競合が発生すること。
+逐次実行ではコールド時も安定して 200 を返す（ウォーム時の速度差 ~60ms は許容範囲）。
+
+この設計は入口画面の安定性優先の判断であり、API Route など他箇所には適用しない。
+
+---
+
+## content_hash による Gemini extraction skip
+
+### skip 発動条件（全条件を満たす場合のみ）
+
+| 条件 | 内容 |
+|------|------|
+| `pages.contentHash IS NOT NULL` | 過去に処理済みで hash が保存されている |
+| `pages.contentHash === 新規取得ハッシュ` | 本文テキストに変化なし |
+| `text.trim() !== ''` | 空本文でないこと（空本文パスは別途 done 扱い） |
+| `extractions 件数 === TOPICS.length` | 全トピックの抽出結果が既に存在すること |
+
+### skip 時の挙動
+
+- `status = done` に更新（`processed_at` は更新しない）
+- Gemini API 呼び出しを省略
+- ログ: `[extract] skipped unchanged page: { pageId, title }`
+- Cron レスポンスの `skipped` フィールドにカウント
+
+### skip が発動しないケース
+
+- トピック定義（`TOPICS`）が変更された → `extractions 件数 !== TOPICS.length` になるため再抽出される
+- Gemini プロンプト・モデルのバージョンを変更した場合は、**自動的に再抽出されない**。  
+  再抽出が必要な場合は DB で手動リセット:
+  ```sql
+  UPDATE notion_ai.pages SET status='pending', content_hash=NULL WHERE status='done';
+  ```
+
+---
+
+## content_hash の役割と現状
+
+`content_hash` は Notion ページ本文テキストの SHA-256 ハッシュ。`notionClient.fetchPageContent()` で生成し、`pages.content_hash` に保存する。
+
+**現状の動作:**
+
+- `done` 更新時に保存される
+- `last_edited_time` が変化した場合、`content_hash` は NULL にリセットされ再処理される
+- **保存のみ。現在はハッシュ比較による差分スキップのロジックは未実装**
+
+`last_edited_time` が変化しても本文が実際には変わっていないケースでも再抽出が走る。
+
+**将来の用途（Phase 3）:**
+
+embeddings / RAG を追加する際、`content_hash` が重要になる。
+
+- 本文が変わっていなければ embedding 再生成をスキップ → Gemini / Embedding API コスト削減
+- `last_edited_time` 変化とは独立した「本文変化」検出が可能
+- embedding のキャッシュ無効化トリガーとして機能する
+
+現時点では「将来の差分管理のために保存している」フィールドとして扱う。
+
+---
+
+## 管理ページの役割分担
+
+| ページ | 役割 | 対象ユーザー |
+|-------|------|------------|
+| `/admin` | 営業・訪問状況ダッシュボード | 営業担当・マネージャー |
+| `/admin/ops` | extraction / cron 運用監視 | システム管理者 |
+| `/admin/customers` | 顧客別 topic 一覧 | 営業担当 |
+| `/search` | キーワード検索 | 全員 |
+
+`pending` / `error` などの処理状態は `/admin/ops` で管理し、`/admin` には表示しない。
+
+---
+
+## 管理ダッシュボード（/admin）の集計表示
+
+### サマリーカード
+
+| カード | 集計 |
+|-------|------|
+| 訪問件数 ※議事録有 | `status='done' AND notion_date IS NOT NULL` |
+| 会社数 | `count(DISTINCT company_name)` where `status='done'` |
+| topic 抽出件数（applicable） | `applicable=true` の extraction 合計件数 |
+| 最終処理日 | `max(processed_at)` |
+
+### 表示順
+
+| # | セクション | 集計基準 |
+|---|-----------|---------|
+| 1 | 全体サマリー | 訪問件数・会社数・topic抽出件数・最終処理日 |
+| 2 | 週別訪問件数 | `notion_date` 基準・直近12週（`processed_at` は使わない） |
+| 3 | 会社別議事録件数 | `company_name` 基準・横スクロールカード形式 |
+| 4 | topic 別件数 | `applicable=true` の extraction 件数 |
+| 5 | 時系列推移 | `notion_date` × `topic` × `applicable=true` の月別クロス集計 |
+
+- 競合出現頻度は `/admin` から非表示（`getCompetitorFrequency` 関数は `queries.ts` に残存）
+- `company_name` は Notion の「会社名」プロパティを cron 同期時に保存
+- `location_name` は Notion の「工場名・拠点名」プロパティを cron 同期時に保存
+- `/admin` は軽量性優先。重い集計・分析は `/admin/trends` などの別ページへ分離する
+- `/admin` は軽量性優先。重い集計・分析クエリは `/admin/trends` などの別ページへ分離する
 
 ---
 

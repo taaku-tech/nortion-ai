@@ -6,6 +6,8 @@ import { getConfig } from './config';
 export interface NotionPageMeta {
   pageId:         string;
   title:          string;
+  companyName:    string | null;
+  locationName:   string | null;
   notionDate:     string | null;
   lastEditedTime: Date;
 }
@@ -155,8 +157,10 @@ function extractPageMeta(page: Record<string, unknown>): NotionPageMeta | null {
 
   const { notion } = getConfig();
 
-  let title:      string       = '（タイトルなし）';
-  let notionDate: string | null = null;
+  let title:        string       = '（タイトルなし）';
+  let companyName:  string | null = null;
+  let locationName: string | null = null;
+  let notionDate:   string | null = null;
 
   // 1. NOTION_DATE_PROPERTY と一致するプロパティを優先探索
   // 2. 見つからなければ date 型プロパティを自動探索
@@ -164,11 +168,19 @@ function extractPageMeta(page: Record<string, unknown>): NotionPageMeta | null {
 
   const entries = Object.entries(properties);
 
-  for (const [, prop] of entries) {
+  for (const [name, prop] of entries) {
     if (prop.type === 'title') {
       const parts = (prop.title as NotionRichText[] | undefined) ?? [];
       const raw   = parts.map((t) => t.plain_text ?? '').join('').trim();
       if (raw) title = raw;
+    }
+    if (name === '会社名' && prop.type === 'rich_text') {
+      const parts = (prop.rich_text as NotionRichText[] | undefined) ?? [];
+      companyName = parts.map((t) => t.plain_text ?? '').join('').trim() || null;
+    }
+    if (name === '工場名・拠点名' && prop.type === 'rich_text') {
+      const parts = (prop.rich_text as NotionRichText[] | undefined) ?? [];
+      locationName = parts.map((t) => t.plain_text ?? '').join('').trim() || null;
     }
   }
 
@@ -195,6 +207,8 @@ function extractPageMeta(page: Record<string, unknown>): NotionPageMeta | null {
   return {
     pageId,
     title,
+    companyName,
+    locationName,
     notionDate,
     lastEditedTime: new Date(lastEditedRaw),
   };

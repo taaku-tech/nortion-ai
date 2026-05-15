@@ -16,6 +16,7 @@ function buildConfig() {
     GEMINI_API_KEY:     process.env.GEMINI_API_KEY,
     CRON_SECRET:        process.env.CRON_SECRET,
     ADMIN_SECRET:       process.env.ADMIN_SECRET,
+    ADMIN_PASSWORD:     process.env.ADMIN_PASSWORD,
   } satisfies Record<string, string | undefined>;
 
   for (const [key, val] of Object.entries(required)) {
@@ -27,10 +28,11 @@ function buildConfig() {
       url: required.DATABASE_URL!,
     },
     notion: {
-      token:        required.NOTION_TOKEN!,
-      databaseId:   required.NOTION_DATABASE_ID!,
-      apiVersion:   process.env.NOTION_API_VERSION    ?? '2022-06-28',
-      dateProperty: process.env.NOTION_DATE_PROPERTY  ?? '日付',
+      token:           required.NOTION_TOKEN!,
+      databaseId:      required.NOTION_DATABASE_ID!,
+      apiVersion:      process.env.NOTION_API_VERSION       ?? '2022-06-28',
+      dateProperty:    process.env.NOTION_DATE_PROPERTY     ?? '日付',
+      databaseViewUrl: process.env.NOTION_DATABASE_VIEW_URL ?? null,
     },
     gemini: {
       apiKey: required.GEMINI_API_KEY!,
@@ -40,7 +42,8 @@ function buildConfig() {
       secret: required.CRON_SECRET!,
     },
     admin: {
-      secret: required.ADMIN_SECRET!,
+      password: required.ADMIN_PASSWORD!,
+      secret:   required.ADMIN_SECRET!,
     },
     processing: {
       batchSize:        parseInt(process.env.BATCH_SIZE        ?? '10',   10),

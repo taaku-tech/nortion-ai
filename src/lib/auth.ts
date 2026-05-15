@@ -19,9 +19,10 @@ export async function requireAuth(): Promise<void> {
   }
 }
 
-export async function setAuthCookie(secret: string): Promise<void> {
+export async function setAuthCookie(): Promise<void> {
+  const { admin } = getConfig();
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, makeToken(secret), {
+  cookieStore.set(COOKIE_NAME, makeToken(admin.secret), {
     httpOnly: true,
     sameSite: 'lax',
     secure:   process.env.NODE_ENV === 'production',

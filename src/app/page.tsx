@@ -1,13 +1,14 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { makeToken } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
 
 export default async function Page() {
-  const adminSecret = process.env.ADMIN_SECRET;
+  const { admin } = getConfig();
   const cookieStore = await cookies();
   const token = cookieStore.get('admin_auth')?.value;
 
-  if (adminSecret && token === makeToken(adminSecret)) {
+  if (token === makeToken(admin.secret)) {
     redirect('/admin');
   }
   redirect('/login');

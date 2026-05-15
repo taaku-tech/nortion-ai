@@ -18,6 +18,12 @@ export const pages = notionAi.table(
     title:               text('title'),
     notionDate:          text('notion_date'),
 
+    // Notion の「会社名」プロパティ
+    companyName:         text('company_name'),
+
+    // Notion の「工場名・拠点名」プロパティ
+    locationName:        text('location_name'),
+
     // Notion API から取得。変化があれば status を pending に戻して再処理する
     lastEditedTime:      timestamp('last_edited_time', { withTimezone: true }),
 
@@ -45,6 +51,7 @@ export const pages = notionAi.table(
     index('idx_notion_ai_pages_status').on(t.status),
     index('idx_notion_ai_pages_last_edited').on(t.lastEditedTime),
     index('idx_notion_ai_pages_processing_started').on(t.processingStartedAt),
+    index('idx_pages_processed_at').on(t.processedAt),
   ],
 );
 

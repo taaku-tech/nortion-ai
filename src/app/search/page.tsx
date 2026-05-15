@@ -86,7 +86,7 @@ export default async function SearchPage({ searchParams }: Props) {
                 className="w-4 h-4"
               />
               <label htmlFor="applicable" className="text-sm text-gray-700">
-                applicable=true のみ
+                AIが重要と判断した内容のみ
               </label>
             </div>
 
@@ -102,7 +102,7 @@ export default async function SearchPage({ searchParams }: Props) {
         {/* 検索前メッセージ */}
         {!hasSearch && (
           <p className="text-sm text-gray-500">
-            キーワード・topic・applicable フィルタを指定して「検索」ボタンを押してください。
+            キーワード・topic・フィルタを指定して「検索」ボタンを押してください。
           </p>
         )}
 
