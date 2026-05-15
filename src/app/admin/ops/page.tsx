@@ -7,16 +7,22 @@ import {
 } from '@/lib/queries';
 
 export default async function OpsPage() {
-  await requireAuth();
+  const tTotal = Date.now();
+  console.log('[ops] start');
 
-  const [stats, errorPages, retryWarnings, remaining] = await Promise.all([
-    getPageStats(),
-    getRecentErrorPages(),
-    getRetryWarnings(),
-    getRemainingWork(),
-  ]);
+  const tAuth = Date.now();
+  await requireAuth();
+  console.log(`[ops] auth: ${Date.now() - tAuth}ms`);
+
+  const tQueries = Date.now();
+  const stats         = await timedPerf('getPageStats',        getPageStats);
+  const errorPages    = await timedPerf('getRecentErrorPages', getRecentErrorPages);
+  const retryWarnings = await timedPerf('getRetryWarnings',    getRetryWarnings);
+  const remaining     = await timedPerf('getRemainingWork',    getRemainingWork);
+  console.log(`[ops] queries: ${Date.now() - tQueries}ms`);
 
   const lastProcessed = formatDateTime(stats.lastProcessedAt);
+  console.log(`[ops] total: ${Date.now() - tTotal}ms`);
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
@@ -135,6 +141,20 @@ export default async function OpsPage() {
       </div>
     </main>
   );
+}
+
+// ─── クエリタイマー ────────────────────────────────────────────────────────────
+
+async function timedPerf<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    const result = await fn();
+    console.log(`[ops] ${label}: ${Date.now() - start}ms`);
+    return result;
+  } catch (err) {
+    console.log(`[ops] ${label} FAILED: ${Date.now() - start}ms | ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
+  }
 }
 
 // ─── ローカルコンポーネント ────────────────────────────────────────────────────
