@@ -49,7 +49,7 @@ Notion ページの取得状態・処理状態を管理する。
 | `location_name` | TEXT | Notion の「工場名・拠点名」プロパティ値 |
 | `last_edited_time` | TIMESTAMPTZ | Notion の最終編集時刻（差分検出に使用） |
 | `content` | TEXT | ページ本文テキスト（キャッシュ） |
-| `content_hash` | TEXT | SHA-256 ハッシュ（保存済み・差分スキップへの活用は未実装） |
+| `content_hash` | TEXT | 本文テキストの SHA-256 ハッシュ（Gemini extraction skip の判定に使用） |
 | `content_length` | INTEGER | 本文文字数 |
 | `status` | TEXT | `pending` / `processing` / `done` / `error` |
 | `error_type` | TEXT | エラー種別（構造化） |
@@ -125,9 +125,9 @@ stateDiagram-v2
 
 ### GET /api/cron/extract
 
-Notion 同期 → Gemini 抽出 → DB 保存を実行する。
+Notion 同期 → Gemini 抽出 → DB 保存を実行する。Vercel Function `maxDuration = 60`（秒）。
 
-**認証:** `Authorization: Bearer {CRON_SECRET}` ヘッダー必須。
+**認証:** `Authorization: Bearer {CRON_SECRET}` ヘッダー、または `?secret={CRON_SECRET}` クエリパラメータのいずれか。
 
 **処理シーケンス:**
 
@@ -145,11 +145,14 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。
   "synced": 10,
   "processed": 5,
   "done": 5,
+  "skipped": 0,
   "error": 0,
   "zombieReset": 0,
   "remaining": 0
 }
 ```
+
+> `skipped`: content_hash 一致により Gemini をスキップしたページ数。
 
 ---
 
@@ -201,6 +204,9 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。
 
 `last_edited_time` を比較し、変化があった場合のみ `status=pending` にリセットして再処理。
 
+**company_name / location_name の特例更新:**  
+`last_edited_time` が変化していない場合でも、DB 上の値が `NULL` であれば Notion から取得した値で上書きする。これにより、カラム追加前から存在していた既存ページへのメタデータ初期投入が可能。
+
 ### 日付プロパティ
 
 1. `NOTION_DATE_PROPERTY` 環境変数で指定したプロパティを優先
@@ -224,7 +230,7 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。
 | `/api/cron/extract` | `Authorization: Bearer {CRON_SECRET}` ヘッダー認証 |
 | `/api/health` | 認証なし（公開） |
 | `/admin`, `/admin/ops`, `/admin/customers`, `/search` | httpOnly cookie（`admin_auth`）認証。SHA-256(salt + ADMIN_SECRET) トークン。 |
-| `/login` | 公開。ADMIN_SECRET 照合後に cookie 発行。 |
+| `/login` | 公開。ADMIN_PASSWORD 照合後に cookie 発行。 |
 | `/logout` | cookie 削除 → `/login` リダイレクト。 |
 
 ### 認証変数の責務分離
@@ -326,7 +332,7 @@ Vercel 本番環境からは不要（migration は手動実行のみ）。
 原因は `max: 1` 接続下で複数クエリが同時キューに積まれ、Transaction Pooler 側で接続割り当て競合が発生すること。
 逐次実行ではコールド時も安定して 200 を返す（ウォーム時の速度差 ~60ms は許容範囲）。
 
-この設計は入口画面の安定性優先の判断であり、API Route など他箇所には適用しない。
+この設計は `/admin`（入口ダッシュボード）の安定性優先の判断であり、`/admin/ops` など他ページには適用しない（`/admin/ops` は `Promise.all` で並列実行）。
 
 ---
 
@@ -359,27 +365,49 @@ Vercel 本番環境からは不要（migration は手動実行のみ）。
 
 ---
 
-## content_hash の役割と現状
+## content_hash の役割
 
 `content_hash` は Notion ページ本文テキストの SHA-256 ハッシュ。`notionClient.fetchPageContent()` で生成し、`pages.content_hash` に保存する。
 
 **現状の動作:**
 
-- `done` 更新時に保存される
-- `last_edited_time` が変化した場合、`content_hash` は NULL にリセットされ再処理される
-- **保存のみ。現在はハッシュ比較による差分スキップのロジックは未実装**
+- 本文取得のたびに計算し、skip 判定に使用（skip 条件は上記「content_hash による Gemini extraction skip」参照）
+- `done` 更新時に DB に保存される
+- `last_edited_time` が変化した場合、UPSERT により `content_hash` は NULL にリセットされ再処理される
 
-`last_edited_time` が変化しても本文が実際には変わっていないケースでも再抽出が走る。
+**Phase 3 での活用予定:**
 
-**将来の用途（Phase 3）:**
+embeddings / RAG 追加時に `content_hash` が重要になる。
 
-embeddings / RAG を追加する際、`content_hash` が重要になる。
-
-- 本文が変わっていなければ embedding 再生成をスキップ → Gemini / Embedding API コスト削減
+- 本文が変わっていなければ embedding 再生成をスキップ → API コスト削減
 - `last_edited_time` 変化とは独立した「本文変化」検出が可能
 - embedding のキャッシュ無効化トリガーとして機能する
 
-現時点では「将来の差分管理のために保存している」フィールドとして扱う。
+---
+
+## 検索仕様（/search）
+
+| 項目 | 仕様 |
+|------|------|
+| 検索対象 | `pages.title` / `pages.content` / `extractions.summary` / `extractions.source_excerpt` |
+| 検索方式 | ILIKE（大文字小文字無視） |
+| フィルタ | topic（固定5種）/ applicable=true のみ |
+| applicable UI 文言 | 「AIが重要と判断した内容のみ」（内部カラム名は `applicable` のまま） |
+| 結果件数上限 | 100件（`processedAt DESC` 順） |
+| 検索前 | 結果は表示しない（フォーム送信後のみ実行） |
+
+---
+
+## 顧客別 Topic 一覧仕様（/admin/customers）
+
+| 項目 | 仕様 |
+|------|------|
+| 表示対象 | `applicable=true` の extractions のみ |
+| 件数切替 | 30件（デフォルト）/ 100件 / 全件（URL param: `?limit=30\|100\|all`） |
+| ソート列 | title / notionDate / topic / processedAt（Whitelist 方式） |
+| ソート方向 | asc / desc（URL param: `?sort=notionDate&order=asc`） |
+| デフォルトソート | `processedAt DESC` |
+| summary / source_excerpt | ソート対象外 |
 
 ---
 
@@ -402,33 +430,32 @@ embeddings / RAG を追加する際、`content_hash` が重要になる。
 
 | カード | 集計 |
 |-------|------|
-| 訪問件数 ※議事録有 | `status='done' AND notion_date IS NOT NULL` |
-| 会社数 | `count(DISTINCT company_name)` where `status='done'` |
-| topic 抽出件数（applicable） | `applicable=true` の extraction 合計件数 |
+| 訪問件数 ※議事録有 | `status='done' AND notion_date IS NOT NULL AND notion_date != ''` |
+| 会社数 | `count(DISTINCT company_name)` where `status='done' AND company_name IS NOT NULL` |
+| topic 抽出個数 | `applicable=true` の extraction 合計件数 |
 | 最終処理日 | `max(processed_at)` |
 
 ### 表示順
 
-| # | セクション | 集計基準 |
-|---|-----------|---------|
-| 1 | 全体サマリー | 訪問件数・会社数・topic抽出件数・最終処理日 |
-| 2 | 週別訪問件数 | `notion_date` 基準・直近12週（`processed_at` は使わない） |
-| 3 | 会社別議事録件数 | `company_name` 基準・横スクロールカード形式 |
-| 4 | topic 別件数 | `applicable=true` の extraction 件数 |
-| 5 | 時系列推移 | `notion_date` × `topic` × `applicable=true` の月別クロス集計 |
+| # | セクション | 集計基準 | 件数制限 |
+|---|-----------|---------|---------|
+| 1 | 全体サマリー | 訪問件数・会社数・topic抽出個数・最終処理日 | - |
+| 2 | 週別訪問件数 | `notion_date` 基準（`processed_at` は使わない） | 直近12週 |
+| 3 | 会社別議事録件数 | `company_name` 基準・件数降順 | 上位30社 |
+| 4 | topic 別件数 | `applicable=true` の extraction 件数 | - |
+| 5 | 時系列推移 | `notion_date` × `topic` × `applicable=true` の月別クロス集計 | - |
 
 - 競合出現頻度は `/admin` から非表示（`getCompetitorFrequency` 関数は `queries.ts` に残存）
 - `company_name` は Notion の「会社名」プロパティを cron 同期時に保存
 - `location_name` は Notion の「工場名・拠点名」プロパティを cron 同期時に保存
-- `/admin` は軽量性優先。重い集計・分析は `/admin/trends` などの別ページへ分離する
-- `/admin` は軽量性優先。重い集計・分析クエリは `/admin/trends` などの別ページへ分離する
+- `/admin` は軽量性優先。重い集計・分析クエリは将来的に `/admin/trends` などの別ページへ分離する
 
 ---
 
 ## 現在の制約
 
-- ネストされた Notion ブロック（toggle 内など）は本文取得対象外
-- 管理画面・検索画面は未実装
-- `/admin` / `/search` のアクセス保護は未実装
+- ネストされた Notion ブロック（toggle 内の段落など）は本文取得対象外
 - 全文検索は ILIKE のみ（pg_trgm / pgvector 未導入）
 - ページ数が多い場合、1回の Cron で全件処理できない（`BATCH_SIZE` 制限あり）
+- Gemini プロンプト・モデルを変更した場合は自動再抽出されない（手動でステータスリセットが必要）
+- `error` になったページの自動復帰なし（Notion 編集または手動 DB リセットが必要）
