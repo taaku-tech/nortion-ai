@@ -71,6 +71,9 @@ export async function getTopicCounts(): Promise<TopicCount[]> {
 export type CustomerTopic = {
   title:         string | null;
   notionDate:    string | null;
+  companyName:   string | null;
+  locationName:  string | null;
+  pageId:        string;
   topic:         string;
   summary:       string;
   sourceExcerpt: string;
@@ -101,6 +104,9 @@ export async function getCustomerTopics(
     .select({
       title:         pages.title,
       notionDate:    pages.notionDate,
+      companyName:   pages.companyName,
+      locationName:  pages.locationName,
+      pageId:        pages.pageId,
       topic:         extractions.topic,
       summary:       extractions.summary,
       sourceExcerpt: extractions.sourceExcerpt,
@@ -236,7 +242,11 @@ export async function getCompanyMeetingCounts(): Promise<CompanyRow[]> {
 export type SearchResult = {
   title:         string | null;
   notionDate:    string | null;
+  companyName:   string | null;
+  locationName:  string | null;
+  pageId:        string;
   topic:         string;
+  applicable:    boolean;
   sourceExcerpt: string;
   summary:       string;
   processedAt:   Date | null;
@@ -266,7 +276,11 @@ export async function searchExtractions(params: {
     .select({
       title:         pages.title,
       notionDate:    pages.notionDate,
+      companyName:   pages.companyName,
+      locationName:  pages.locationName,
+      pageId:        pages.pageId,
       topic:         extractions.topic,
+      applicable:    extractions.applicable,
       sourceExcerpt: extractions.sourceExcerpt,
       summary:       extractions.summary,
       processedAt:   pages.processedAt,

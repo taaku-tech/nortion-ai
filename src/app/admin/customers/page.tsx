@@ -85,8 +85,8 @@ export default async function CustomersPage({ searchParams }: Props) {
         {/* 件数表示 */}
         <p className="text-sm text-gray-500">{rows.length} 件</p>
 
-        {/* テーブル */}
-        <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
+        {/* テーブル (PC: md以上) */}
+        <div className="hidden md:block overflow-x-auto bg-white rounded-lg border border-gray-200">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-100">
               <tr>
@@ -130,6 +130,73 @@ export default async function CustomersPage({ searchParams }: Props) {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* スマホ用ソート (md未満) */}
+        <div className="md:hidden flex flex-wrap gap-2 text-xs">
+          <span className="text-gray-500 self-center">並び替え:</span>
+          {([
+            { key: 'processedAt', label: '処理日' },
+            { key: 'notionDate',  label: '日付' },
+            { key: 'title',       label: 'タイトル' },
+            { key: 'topic',       label: 'topic' },
+          ] as { key: SortColumn; label: string }[]).map(({ key, label }) => {
+            const isActive = sort === key;
+            const next: SortOrder = isActive && order === 'desc' ? 'asc' : 'desc';
+            return (
+              <a key={key} href={buildSortHref(limit, key, next)}
+                className={`px-2 py-1 rounded border ${isActive
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 border-gray-300'}`}>
+                {label}{isActive ? (order === 'asc' ? ' ↑' : ' ↓') : ''}
+              </a>
+            );
+          })}
+        </div>
+
+        {/* スマホ用カード (md未満) */}
+        <div className="md:hidden space-y-3">
+          {rows.length === 0 && (
+            <p className="text-center text-gray-400 py-8">データなし</p>
+          )}
+          {rows.map((row, i) => {
+            const notionUrl = `https://www.notion.so/${row.pageId.replace(/-/g, '')}`;
+            return (
+              <div key={i} className="bg-white rounded-lg border border-gray-200 p-4 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-medium text-gray-900 break-words">{row.title ?? '—'}</span>
+                  <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 whitespace-nowrap shrink-0">
+                    {row.topic}
+                  </span>
+                </div>
+                {(row.companyName || row.locationName) && (
+                  <p className="text-xs text-gray-500">
+                    {[row.companyName, row.locationName].filter(Boolean).join(' / ')}
+                  </p>
+                )}
+                <p className="text-xs text-gray-400">{row.notionDate ?? '—'}</p>
+                {row.summary && (
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap break-words line-clamp-4">{row.summary}</p>
+                )}
+                {row.sourceExcerpt && (
+                  <p className="text-xs italic text-gray-500 whitespace-pre-wrap break-words line-clamp-3">{row.sourceExcerpt}</p>
+                )}
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-400">
+                    処理日: {row.processedAt
+                      ? (row.processedAt instanceof Date
+                          ? row.processedAt.toLocaleDateString('ja-JP')
+                          : String(row.processedAt))
+                      : '—'}
+                  </p>
+                  <a href={notionUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-blue-600 underline">
+                    Notion本文を見る
+                  </a>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
       </div>
