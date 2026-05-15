@@ -22,9 +22,14 @@ export async function GET(req: Request): Promise<Response> {
   // ── [0] 認証 ────────────────────────────────────────────────────────────────
   // Vercel は Cron 実行時に Authorization: Bearer {CRON_SECRET} を自動付与する
   const { cron, processing } = getConfig();
-  const authHeader = req.headers.get('authorization');
+  const authHeader  = req.headers.get('authorization');
+  const querySecret = new URL(req.url).searchParams.get('secret');
 
-  if (authHeader !== `Bearer ${cron.secret}`) {
+  const isAuthorized =
+    authHeader  === `Bearer ${cron.secret}` ||
+    querySecret === cron.secret;
+
+  if (!isAuthorized) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
