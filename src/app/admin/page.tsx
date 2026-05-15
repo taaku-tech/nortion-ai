@@ -13,7 +13,13 @@ import {
 const TOPICS = ['デジタル化', '値上げ', '増産', '自動化', '困りごと'] as const;
 
 export default async function AdminPage() {
+  const tTotal = Date.now();
+  console.log('[admin] start');
+
+  const tAuth = Date.now();
   await requireAuth();
+  console.log(`[admin] auth: ${Date.now() - tAuth}ms`);
+
   const { notion } = getConfig();
 
   const tQueries = Date.now();
@@ -37,6 +43,7 @@ export default async function AdminPage() {
     : '—';
   const totalApplicable = topicCounts.reduce((sum, r) => sum + r.count, 0);
 
+  console.log(`[admin] total: ${Date.now() - tTotal}ms`);
   return (
     <main className="min-h-screen bg-gray-50 p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-8">
