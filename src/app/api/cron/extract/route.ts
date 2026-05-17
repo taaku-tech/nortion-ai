@@ -1,4 +1,4 @@
-import { eq, and, lt, sql, inArray } from 'drizzle-orm';
+import { eq, and, lt, sql, inArray, or, isNull } from 'drizzle-orm';
 import { getDb, pages, extractions } from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { fetchNotionPages, fetchPageContent } from '@/lib/notionClient';
@@ -118,16 +118,23 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   // ── [3] 抽出処理（BATCH_SIZE 件まで） ────────────────────────────────────────
+  // pending ページ + embedding 未保存の done ページを対象にする
   const targets = await db
     .select()
     .from(pages)
-    .where(eq(pages.status, 'pending'))
+    .where(
+      or(
+        eq(pages.status, 'pending'),
+        and(eq(pages.status, 'done'), isNull(pages.embedding)),
+      )
+    )
     .limit(processing.batchSize)
-    .for('update', { skipLocked: true }); // 将来の並列実行にも対応
+    .for('update', { skipLocked: true });
 
-  let doneCount    = 0;
-  let errorCount   = 0;
-  let skippedCount = 0;
+  let doneCount     = 0;
+  let errorCount    = 0;
+  let skippedCount  = 0;
+  let embeddedCount = 0;
 
   for (const page of targets) {
     // processing にセット（ゾンビ検出のために processing_started_at を記録）
@@ -208,6 +215,7 @@ export async function GET(req: Request): Promise<Response> {
 
       // Gemini で embedding 生成（embeddingSkipped = false のため必ず実行）
       const newEmbedding = await generateEmbedding(text);
+      embeddedCount++;
 
       // done に更新（embedding を含む）
       await db
@@ -253,14 +261,21 @@ export async function GET(req: Request): Promise<Response> {
     .from(pages)
     .where(eq(pages.status, 'pending'));
 
+  const [{ missingEmbedding }] = await db
+    .select({ missingEmbedding: sql<number>`count(*)::int` })
+    .from(pages)
+    .where(and(eq(pages.status, 'done'), isNull(pages.embedding)));
+
   return Response.json({
-    ok:         true,
-    synced:     notionPages.length,
-    processed:  targets.length,
-    done:       doneCount,
-    skipped:    skippedCount,
-    error:      errorCount,
-    zombieReset: zombieCount ?? 0,
+    ok:              true,
+    synced:          notionPages.length,
+    processed:       targets.length,
+    done:            doneCount,
+    skipped:         skippedCount,
+    error:           errorCount,
+    embedded:        embeddedCount,
+    zombieReset:     zombieCount ?? 0,
     remaining,
+    missingEmbedding,
   });
 }
