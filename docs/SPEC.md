@@ -229,7 +229,7 @@ Notion 同期 → Gemini 抽出 → DB 保存を実行する。Vercel Function `
 |---------|------|
 | `/api/cron/extract` | `Authorization: Bearer {CRON_SECRET}` ヘッダー認証 |
 | `/api/health` | 認証なし（公開） |
-| `/admin`, `/admin/ops`, `/admin/customers`, `/search` | httpOnly cookie（`admin_auth`）認証。SHA-256(salt + ADMIN_SECRET) トークン。 |
+| `/admin`, `/admin/ops`, `/admin/customers`, `/search` | httpOnly cookie（`admin_auth`）認証。SHA-256(salt + ADMIN_SECRET) トークン。有効期限 12 時間。 |
 | `/login` | 公開。ADMIN_PASSWORD 照合後に cookie 発行。 |
 | `/logout` | cookie 削除 → `/login` リダイレクト。 |
 
@@ -385,6 +385,21 @@ embeddings / RAG 追加時に `content_hash` が重要になる。
 
 ---
 
+## /login ページ
+
+### 表示内容
+
+| 要素 | 内容 |
+|------|------|
+| タイトル | Notion営業議事録AI |
+| サブタイトル | 営業議事録をAIで整理し、商談・訪問知識として活用するための管理画面です。 |
+| 説明文 | Notionに蓄積された営業議事録をAIで解析し、「デジタル化」「値上げ」「増産」「自動化」「困りごと」などの重要トピックを抽出します。ログイン後は、訪問状況ダッシュボードや抽出結果の検索画面を確認できます。 |
+| 補足文 | 営業担当・マネージャー向けの画面です。パスワードを入力してください。 |
+
+認証処理は `loginAction`（Server Action）が担当。`ADMIN_PASSWORD` と照合後、`setAuthCookie()` で cookie を発行して `/admin` にリダイレクト。
+
+---
+
 ## 検索仕様（/search）
 
 | 項目 | 仕様 |
@@ -395,6 +410,17 @@ embeddings / RAG 追加時に `content_hash` が重要になる。
 | applicable UI 文言 | 「AIが重要と判断した内容のみ」（内部カラム名は `applicable` のまま） |
 | 結果件数上限 | 100件（`processedAt DESC` 順） |
 | 検索前 | 結果は表示しない（フォーム送信後のみ実行） |
+
+### レスポンシブ対応
+
+| 画面幅 | レイアウト |
+|--------|----------|
+| md 以上（PC） | テーブル表示（タイトル・日付・topic・source_excerpt・summary・処理日時） |
+| md 未満（スマホ） | カード表示 |
+
+**スマホカード表示項目:** タイトル / topic バッジ / 会社名・拠点名 / 日付 / applicable バッジ（「AIが重要と判断」）/ summary（最大4行）/ source_excerpt（最大3行）/ 処理日 / Notion本文リンク
+
+**Notion本文リンク:** `https://www.notion.so/{pageId（ダッシュ除去）}` を DB の `page_id` から生成
 
 ---
 
@@ -408,6 +434,19 @@ embeddings / RAG 追加時に `content_hash` が重要になる。
 | ソート方向 | asc / desc（URL param: `?sort=notionDate&order=asc`） |
 | デフォルトソート | `processedAt DESC` |
 | summary / source_excerpt | ソート対象外 |
+
+### レスポンシブ対応
+
+| 画面幅 | レイアウト |
+|--------|----------|
+| md 以上（PC） | テーブル表示（タイトル・日付・topic・summary・source_excerpt・処理日時） |
+| md 未満（スマホ） | カード表示 + ソートボタン |
+
+**スマホカード表示項目:** タイトル / topic バッジ / 会社名・拠点名 / 日付 / summary（最大4行）/ source_excerpt（最大3行）/ 処理日 / Notion本文リンク
+
+**スマホ用ソートボタン:** 処理日 / 日付 / タイトル / topic（URL パラメータ方式で動作、PC と共通）
+
+**Notion本文リンク:** `https://www.notion.so/{pageId（ダッシュ除去）}` を DB の `page_id` から生成
 
 ---
 

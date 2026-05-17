@@ -2,7 +2,7 @@ import { eq, and, lt, sql, inArray } from 'drizzle-orm';
 import { getDb, pages, extractions } from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { fetchNotionPages, fetchPageContent } from '@/lib/notionClient';
-import { extractTopics, toErrorType, TOPICS, type Topic } from '@/lib/geminiClient';
+import { extractTopics, generateEmbedding, toErrorType, TOPICS, type Topic } from '@/lib/geminiClient';
 import type { ErrorType } from '@/lib/db';
 
 /** Vercel Function の最大実行時間（秒）。Pro プランは 300 まで設定可能 */
@@ -140,8 +140,12 @@ export async function GET(req: Request): Promise<Response> {
       // 本文取得
       const { text, contentHash, contentLength } = await fetchPageContent(page.pageId);
 
-      // content_hash 一致 → skip（本文変更なし、Gemini API を呼ばない）
-      if (page.contentHash !== null && page.contentHash === contentHash && text.trim()) {
+      // content_hash 一致チェック（本文変更なし判定）
+      const hashMatch = page.contentHash !== null && page.contentHash === contentHash && text.trim() !== '';
+
+      // extraction skip チェック
+      let extractionSkipped = false;
+      if (hashMatch) {
         const [{ cnt }] = await db
           .select({ cnt: sql<number>`count(*)::int` })
           .from(extractions)
@@ -149,16 +153,23 @@ export async function GET(req: Request): Promise<Response> {
             eq(extractions.pageId, page.pageId),
             inArray(extractions.topic, [...TOPICS]),
           ));
-
         if (cnt === TOPICS.length) {
-          console.log('[extract] skipped unchanged page:', { pageId: page.pageId, title: page.title });
-          await db.update(pages).set({ status: 'done' }).where(eq(pages.pageId, page.pageId));
-          skippedCount++;
-          continue;
+          extractionSkipped = true;
         }
       }
 
-      // 本文なし → done（再処理不要、Gemini API を呼ばない）
+      // embedding skip チェック（content_hash 一致かつ embedding 保存済みの場合はスキップ）
+      const embeddingSkipped = hashMatch && page.embedding !== null;
+
+      // extraction・embedding ともにスキップ可能 → done
+      if (extractionSkipped && embeddingSkipped) {
+        console.log('[extract] skipped unchanged page:', { pageId: page.pageId, title: page.title });
+        await db.update(pages).set({ status: 'done' }).where(eq(pages.pageId, page.pageId));
+        skippedCount++;
+        continue;
+      }
+
+      // 本文なし → done（embedding も生成しない）
       if (!text.trim()) {
         await db
           .update(pages)
@@ -168,32 +179,37 @@ export async function GET(req: Request): Promise<Response> {
         continue;
       }
 
-      // Gemini でトピック抽出（内部でリトライ付き）
-      const extracted = await extractTopics(page.title ?? '', text);
+      // Gemini でトピック抽出（必要な場合のみ）
+      if (!extractionSkipped) {
+        const extracted = await extractTopics(page.title ?? '', text);
 
-      // extractions を UPSERT（冪等性：同一 page_id + topic は上書き）
-      for (const topic of TOPICS) {
-        const result = extracted[topic as Topic];
-        await db
-          .insert(extractions)
-          .values({
-            pageId:        page.pageId,
-            topic,
-            applicable:    result.applicable,
-            sourceExcerpt: result.applicable ? result.source_excerpt : '',
-            summary:       result.applicable ? result.summary        : '',
-          })
-          .onConflictDoUpdate({
-            target: [extractions.pageId, extractions.topic],
-            set: {
+        // extractions を UPSERT（冪等性：同一 page_id + topic は上書き）
+        for (const topic of TOPICS) {
+          const result = extracted[topic as Topic];
+          await db
+            .insert(extractions)
+            .values({
+              pageId:        page.pageId,
+              topic,
               applicable:    result.applicable,
               sourceExcerpt: result.applicable ? result.source_excerpt : '',
               summary:       result.applicable ? result.summary        : '',
-            },
-          });
+            })
+            .onConflictDoUpdate({
+              target: [extractions.pageId, extractions.topic],
+              set: {
+                applicable:    result.applicable,
+                sourceExcerpt: result.applicable ? result.source_excerpt : '',
+                summary:       result.applicable ? result.summary        : '',
+              },
+            });
+        }
       }
 
-      // done に更新
+      // Gemini で embedding 生成（embeddingSkipped = false のため必ず実行）
+      const newEmbedding = await generateEmbedding(text);
+
+      // done に更新（embedding を含む）
       await db
         .update(pages)
         .set({
@@ -204,6 +220,7 @@ export async function GET(req: Request): Promise<Response> {
           processedAt:   now,
           errorType:     null,
           errorMsg:      null,
+          embedding:     newEmbedding,
         })
         .where(eq(pages.pageId, page.pageId));
 

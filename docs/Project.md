@@ -48,6 +48,9 @@
 - [x] Cookie 認証（`/login` / `/logout` / `requireAuth()`）
 - [x] 認証変数分離（`ADMIN_PASSWORD` = ログイン用 / `ADMIN_SECRET` = cookie hash 用）
 - [x] Notion DB ビュー URL リンク（`NOTION_DATABASE_VIEW_URL`）
+- [x] `/login` UI ブランディング（タイトル「Notion営業議事録AI」・サービス説明文・補足文）
+- [x] `/admin/customers` スマホ対応（md未満でカード表示・スマホ用ソートボタン・Notion本文リンク）
+- [x] `/search` スマホ対応（md未満でカード表示・applicable バッジ・Notion本文リンク）
 
 ### Phase 3（⬜ 次）: 知識 DB の深化
 
@@ -76,8 +79,9 @@
 | 議事録ページ処理（37件処理済み） | ✅ |
 | `/admin` ダッシュボード | ✅ |
 | `/admin/ops` 運用監視 | ✅ |
-| `/admin/customers` 顧客別一覧 | ✅ |
-| `/search` キーワード検索 | ✅ |
+| `/admin/customers` 顧客別一覧（スマホ対応済み） | ✅ |
+| `/search` キーワード検索（スマホ対応済み） | ✅ |
+| `/login` ブランディング・説明文 | ✅ |
 
 ### DB schema（適用済み migration）
 

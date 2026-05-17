@@ -10,7 +10,9 @@ import {
   GoogleGenerativeAI,
   GoogleGenerativeAIFetchError,
   SchemaType,
+  TaskType,
   type Schema,
+  type EmbedContentRequest,
 } from '@google/generative-ai';
 import { getConfig } from './config';
 
@@ -221,6 +223,54 @@ export async function extractTopics(
  * cron route.ts でのエラー分類に使用する。
  */
 export { toErrorType };
+
+// ─── Embedding クライアント ───────────────────────────────────────────────────
+
+const EMBED_MODEL = 'text-embedding-004';
+
+let _embedClient: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
+
+function getEmbedClient() {
+  if (_embedClient) return _embedClient;
+  const { gemini } = getConfig();
+  const genAI = new GoogleGenerativeAI(gemini.apiKey);
+  _embedClient = genAI.getGenerativeModel({ model: EMBED_MODEL });
+  return _embedClient;
+}
+
+/**
+ * テキストを 768 次元の embedding ベクトルに変換する。
+ * 429・5xx・ネットワークエラーは指数バックオフでリトライする。
+ *
+ * @param text 埋め込み対象テキスト（空文字列は呼び出し元で弾くこと）
+ * @returns 768 次元の number 配列
+ * @throws maxRetries 回を超えた場合に最後のエラーを再スロー
+ */
+export async function generateEmbedding(text: string): Promise<number[]> {
+  const client = getEmbedClient();
+  const request: EmbedContentRequest = {
+    content: { parts: [{ text }], role: 'user' },
+    taskType: TaskType.RETRIEVAL_DOCUMENT,
+  };
+
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    try {
+      const result = await client.embedContent(request);
+      return result.embedding.values;
+    } catch (err) {
+      lastError = err;
+      const shouldRetry = attempt < 3 && isTransient(err);
+      if (!shouldRetry) break;
+      const wait = Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_WAIT);
+      const retryAfterMs = err instanceof GoogleGenerativeAIFetchError ? parseRetryAfter(err) : null;
+      await sleep(retryAfterMs ?? wait);
+    }
+  }
+
+  throw lastError;
+}
 
 // ─── 内部ユーティリティ ───────────────────────────────────────────────────────
 

@@ -7,7 +7,20 @@ import {
   boolean,
   index,
   uniqueIndex,
+  customType,
 } from 'drizzle-orm/pg-core';
+
+const vector768 = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return 'vector(768)';
+  },
+  toDriver(val: number[]): string {
+    return `[${val.join(',')}]`;
+  },
+  fromDriver(val: string): number[] {
+    return val.slice(1, -1).split(',').map(Number);
+  },
+});
 
 const notionAi = pgSchema('notion_ai');
 
@@ -43,6 +56,8 @@ export const pages = notionAi.table(
     // ゾンビ検出の基準時刻（processing にセットした瞬間を記録）
     processingStartedAt: timestamp('processing_started_at', { withTimezone: true }),
     processedAt:         timestamp('processed_at',          { withTimezone: true }),
+
+    embedding:           vector768('embedding'),
 
     createdAt:           timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:           timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
