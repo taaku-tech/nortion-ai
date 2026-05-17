@@ -234,7 +234,7 @@ function getEmbedClient() {
   if (_embedClient) return _embedClient;
   const { gemini } = getConfig();
   const genAI = new GoogleGenerativeAI(gemini.apiKey);
-  _embedClient = genAI.getGenerativeModel({ model: EMBED_MODEL });
+  _embedClient = genAI.getGenerativeModel({ model: EMBED_MODEL }, { apiVersion: 'v1' });
   return _embedClient;
 }
 
