@@ -226,7 +226,7 @@ export { toErrorType };
 
 // ─── Embedding クライアント ───────────────────────────────────────────────────
 
-const EMBED_MODEL = 'embedding-001';
+const EMBED_MODEL = 'text-embedding-004';
 
 let _embedClient: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
 
@@ -234,7 +234,8 @@ function getEmbedClient() {
   if (_embedClient) return _embedClient;
   const { gemini } = getConfig();
   const genAI = new GoogleGenerativeAI(gemini.apiKey);
-  _embedClient = genAI.getGenerativeModel({ model: EMBED_MODEL });
+  // text-embedding-004 は v1beta では 404。v1 を明示指定する。
+  _embedClient = genAI.getGenerativeModel({ model: EMBED_MODEL }, { apiVersion: 'v1' });
   return _embedClient;
 }
 
