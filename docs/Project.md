@@ -52,10 +52,11 @@
 - [x] `/admin/customers` スマホ対応（md未満でカード表示・スマホ用ソートボタン・Notion本文リンク）
 - [x] `/search` スマホ対応（md未満でカード表示・applicable バッジ・Notion本文リンク）
 
-### Phase 3（⬜ 次）: 知識 DB の深化
+### Phase 3（🔄 進行中）: 知識 DB の深化
 
-- [ ] ページ本文の embeddings 化（pgvector）
-- [ ] セマンティック検索（類似事例探索）
+- [x] ページ本文の embeddings 化（pgvector / gemini-embedding-001 / vector(768)）
+- [ ] セマンティック検索 UI（類似事例探索、/search への類似検索追加）
+- [ ] HNSW インデックス（ページ数増加時のベクトル検索高速化）
 - [ ] RAG による「過去の類似商談を参照しながらの提案支援」
 - [ ] 競合情報の自動タグ付け・competitors テーブル化
 - [ ] 顧客マスタ（companies テーブル）との紐付け
@@ -68,7 +69,7 @@
 
 ---
 
-## 現在の実装状況（2026-05-15 時点）
+## 現在の実装状況（2026-05-18 時点）
 
 ### 本番稼働中
 
@@ -76,12 +77,13 @@
 |------|------|
 | Notion → Gemini → Supabase パイプライン | ✅ 本番稼働 |
 | Vercel Cron（毎日 3:00 UTC） | ✅ 設定済み |
-| 議事録ページ処理（37件処理済み） | ✅ |
+| 議事録ページ処理（40件処理済み） | ✅ |
 | `/admin` ダッシュボード | ✅ |
 | `/admin/ops` 運用監視 | ✅ |
 | `/admin/customers` 顧客別一覧（スマホ対応済み） | ✅ |
 | `/search` キーワード検索（スマホ対応済み） | ✅ |
 | `/login` ブランディング・説明文 | ✅ |
+| embedding 生成・保存（gemini-embedding-001 / vector(768)） | ✅ 全40件完了 |
 
 ### DB schema（適用済み migration）
 
@@ -92,6 +94,7 @@
 | 0003_add_processed_at_index.sql | processed_at インデックス（timeout対策） |
 | 0004_add_company_name.sql | company_name カラム |
 | 0005_add_location_name.sql | location_name カラム |
+| 0006_add_embedding.sql | pgvector 拡張・embedding vector(768) カラム |
 
 ---
 
@@ -110,10 +113,11 @@
 
 - **議事録は読み取り専用**: Notion への書き戻しは行わない
 - **差分同期**: `last_edited_time` による変更検出で、未変更ページは再処理しない
-- **段階的拡張**: 最初は ILIKE 検索、将来 pg_trgm → pgvector へ移行
-- **スキーマ分離**: `notion_ai` スキーマで他プロジェクトと分離（KIGEN-NAVIGATOR DB 内に同居）
-- **逐次実行**: `/admin` の DB クエリは `Promise.all` ではなく逐次 await（Supabase Transaction Pooler との相性対策）
+- **段階的拡張**: ILIKE 検索から pgvector 類似検索へ段階的に移行
+- **スキーマ分離**: `notion_ai` スキーマで他プロジェクトと分離
+- **逐次実行**: admin 系ページの DB クエリは全て逐次 await（`Promise.all` 禁止。`max:1` + Supabase Transaction Pooler では接続競合が発生するため）
 - **手動 migration**: `drizzle-kit migrate` は使わず Supabase SQL Editor で手動適用
+- **embedding**: 3072次元を `.slice(0, 768)` で切り詰め保存（Matryoshka 方式）。類似検索は未実装
 
 ---
 
