@@ -229,6 +229,7 @@ export { toErrorType };
 const EMBED_MODEL = 'gemini-embedding-001';
 
 let _embedClient: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
+let _dimLogged = false;
 
 function getEmbedClient() {
   if (_embedClient) return _embedClient;
@@ -258,7 +259,12 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   for (let attempt = 0; attempt <= 3; attempt++) {
     try {
       const result = await client.embedContent(request);
-      const values = result.embedding.values;
+      const raw = result.embedding.values;
+      if (!_dimLogged) {
+        console.log(`[embedding] sourceDim=${raw.length} storedDim=768`);
+        _dimLogged = true;
+      }
+      const values = raw.slice(0, 768);
       if (values.length !== 768) {
         throw new Error(`Unexpected embedding dimension: ${values.length}`);
       }
