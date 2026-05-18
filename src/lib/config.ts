@@ -35,8 +35,9 @@ function buildConfig() {
       databaseViewUrl: process.env.NOTION_DATABASE_VIEW_URL ?? null,
     },
     gemini: {
-      apiKey: required.GEMINI_API_KEY!,
-      model:  process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+      apiKey:         required.GEMINI_API_KEY!,
+      model:          process.env.GEMINI_MODEL          ?? 'gemini-2.5-flash',
+      embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001',
     },
     cron: {
       secret: required.CRON_SECRET!,

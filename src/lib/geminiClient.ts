@@ -226,8 +226,6 @@ export { toErrorType };
 
 // ─── Embedding クライアント ───────────────────────────────────────────────────
 
-const EMBED_MODEL = 'gemini-embedding-001';
-
 let _embedClient: ReturnType<GoogleGenerativeAI['getGenerativeModel']> | null = null;
 let _dimLogged = false;
 
@@ -235,7 +233,7 @@ function getEmbedClient() {
   if (_embedClient) return _embedClient;
   const { gemini } = getConfig();
   const genAI = new GoogleGenerativeAI(gemini.apiKey);
-  _embedClient = genAI.getGenerativeModel({ model: EMBED_MODEL });
+  _embedClient = genAI.getGenerativeModel({ model: gemini.embeddingModel });
   return _embedClient;
 }
 
