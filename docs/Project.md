@@ -42,7 +42,7 @@
   - 会社別議事録件数（横スクロールカード形式、上位30社）
   - topic 別件数（applicable=true）
   - 時系列推移（月別 × topic 別）
-- [x] 運用監視画面（`/admin/ops`）: Extraction Health / Error Pages / Retry Warnings / Remaining Work
+- [x] 運用監視画面（`/admin/ops`）: 全体サマリー・Daily Summary・Newly Loaded Pages・Error Pages・Retry Warnings
 - [x] 顧客別 topic 一覧（`/admin/customers`）: ソート・件数切替対応
 - [x] 検索画面（`/search`）: キーワード・topic・applicable 絞り込み（ILIKE、最大100件）
 - [x] Cookie 認証（`/login` / `/logout` / `requireAuth()`）
@@ -52,9 +52,19 @@
 - [x] `/admin/customers` スマホ対応（md未満でカード表示・スマホ用ソートボタン・Notion本文リンク）
 - [x] `/search` スマホ対応（md未満でカード表示・applicable バッジ・Notion本文リンク）
 
-### Phase 3（🔄 進行中）: 知識 DB の深化
+### Phase 3（🔄 進行中）: 知識 DB の深化・運用改善
 
 - [x] ページ本文の embeddings 化（pgvector / gemini-embedding-001 / vector(768)）
+- [x] extraction retry policy 改善（retryable / non-retryable エラー分類）
+  - Notion 404/403/401 → `permanent_error`（恒久失敗。retry_count 増加なし・cron 対象外）
+  - 一時的エラー（5xx・429・ネットワーク）→ `error`（従来通り）
+- [x] Cron 土日スキップ（JST 曜日判定。Vercel Cron は UTC 実行のため変換必須）
+- [x] `/admin/ops` 日別運用監視強化
+  - Daily Summary（直近14日 × 新規取込 / 処理 / done / error / retry⚠ / stuck）
+  - Newly Loaded Pages（直近20件、created_at 基準）
+  - Recent Error Pages 改善（Notion日付 ≠ エラー検出日時 を明示分離、permanent_error 対応）
+  - Retry Warnings から permanent_error を除外
+  - Health Summary / Remaining Work に permanent_error カード追加
 - [ ] セマンティック検索 UI（類似事例探索、/search への類似検索追加）
 - [ ] HNSW インデックス（ページ数増加時のベクトル検索高速化）
 - [ ] RAG による「過去の類似商談を参照しながらの提案支援」
@@ -69,17 +79,18 @@
 
 ---
 
-## 現在の実装状況（2026-05-18 時点）
+## 現在の実装状況（2026-05-20 時点）
 
 ### 本番稼働中
 
 | 機能 | 状態 |
 |------|------|
 | Notion → Gemini → Supabase パイプライン | ✅ 本番稼働 |
-| Vercel Cron（毎日 3:00 UTC） | ✅ 設定済み |
+| Vercel Cron（毎日 3:00 UTC、JST 土日スキップ） | ✅ 設定済み |
 | 議事録ページ処理（40件処理済み） | ✅ |
+| extraction retry policy（retryable / non-retryable 分類） | ✅ |
 | `/admin` ダッシュボード | ✅ |
-| `/admin/ops` 運用監視 | ✅ |
+| `/admin/ops` 運用監視（Daily Summary / Newly Loaded Pages 追加済み） | ✅ |
 | `/admin/customers` 顧客別一覧（スマホ対応済み） | ✅ |
 | `/search` キーワード検索（スマホ対応済み） | ✅ |
 | `/login` ブランディング・説明文 | ✅ |
@@ -95,6 +106,8 @@
 | 0004_add_company_name.sql | company_name カラム |
 | 0005_add_location_name.sql | location_name カラム |
 | 0006_add_embedding.sql | pgvector 拡張・embedding vector(768) カラム |
+
+> `permanent_error` ステータスはコード変更のみ（`status` カラムは TEXT 型で CHECK 制約なし。migration 不要）。
 
 ---
 
@@ -118,6 +131,8 @@
 - **逐次実行**: admin 系ページの DB クエリは全て逐次 await（`Promise.all` 禁止。`max:1` + Supabase Transaction Pooler では接続競合が発生するため）
 - **手動 migration**: `drizzle-kit migrate` は使わず Supabase SQL Editor で手動適用
 - **embedding**: 3072次元を `.slice(0, 768)` で切り詰め保存（Matryoshka 方式）。類似検索は未実装
+- **permanent_error**: Notion 404/403/401 等の恒久失敗は `permanent_error` に分類し、retry_count を増やさず次回 cron 対象からも除外する。zombie検出・Retry Warnings の対象外
+- **Cron 土日スキップ**: JST 曜日で判定。Vercel Cron は UTC 実行のため `Intl.DateTimeFormat` で Asia/Tokyo 変換後に判定
 
 ---
 
@@ -125,7 +140,10 @@
 
 | 優先度 | 課題 |
 |--------|------|
+| 高 | セマンティック検索 UI（/search に pgvector 類似検索を追加） |
+| 中 | HNSW インデックス（ページ数増加時のベクトル検索高速化） |
 | 中 | Gemini モデル・プロンプト変更時の再抽出方法が手動リセットのみ |
 | 中 | 競合出現頻度（`getCompetitorFrequency`）は実装済みだが UI から削除済み。活用方法検討 |
 | 低 | ネストされた Notion ブロック（toggle 内など）は本文取得対象外 |
 | 低 | 全文検索は ILIKE のみ（pg_trgm / pgvector 未導入） |
+| 低 | permanent_error ページの一括リセット UI（現状は SQL 手動実行のみ） |
