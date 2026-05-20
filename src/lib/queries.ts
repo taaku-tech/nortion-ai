@@ -10,6 +10,7 @@ export type PageStats = {
   companyCount:    number;
   pending:         number;
   error:           number;
+  permanentError:  number;
   processing:      number;
   lastProcessedAt: Date | null;
 };
@@ -25,6 +26,7 @@ export async function getPageStats(): Promise<PageStats> {
       count(DISTINCT company_name) FILTER (WHERE status = 'done' AND company_name IS NOT NULL AND company_name != '')::int AS company_count,
       count(*) FILTER (WHERE status = 'pending')::int                                           AS pending,
       count(*) FILTER (WHERE status = 'error')::int                                             AS error,
+      count(*) FILTER (WHERE status = 'permanent_error')::int                                   AS permanent_error,
       count(*) FILTER (WHERE status = 'processing')::int                                        AS processing,
       max(processed_at)                                                                          AS last_processed_at
     FROM ${pages}
@@ -32,7 +34,7 @@ export async function getPageStats(): Promise<PageStats> {
 
   const row = (rows as unknown as Array<{
     total: unknown; done: unknown; done_with_date: unknown; company_count: unknown;
-    pending: unknown; error: unknown; processing: unknown; last_processed_at: unknown;
+    pending: unknown; error: unknown; permanent_error: unknown; processing: unknown; last_processed_at: unknown;
   }>)[0];
 
   return {
@@ -42,6 +44,7 @@ export async function getPageStats(): Promise<PageStats> {
     companyCount:    Number(row.company_count),
     pending:         Number(row.pending),
     error:           Number(row.error),
+    permanentError:  Number(row.permanent_error),
     processing:      Number(row.processing),
     lastProcessedAt: row.last_processed_at instanceof Date
                        ? row.last_processed_at
@@ -297,8 +300,10 @@ export async function searchExtractions(params: {
 export type ErrorPage = {
   title:       string | null;
   notionDate:  string | null;
+  status:      string;
   retryCount:  number;
   processedAt: Date | null;
+  updatedAt:   Date;
   errorType:   string | null;
   errorMsg:    string | null;
 };
@@ -309,14 +314,16 @@ export async function getRecentErrorPages(): Promise<ErrorPage[]> {
     .select({
       title:       pages.title,
       notionDate:  pages.notionDate,
+      status:      pages.status,
       retryCount:  pages.retryCount,
       processedAt: pages.processedAt,
+      updatedAt:   pages.updatedAt,
       errorType:   pages.errorType,
       errorMsg:    pages.errorMsg,
     })
     .from(pages)
-    .where(eq(pages.status, 'error'))
-    .orderBy(sql`${pages.processedAt} desc nulls last`)
+    .where(sql`${pages.status} IN ('error', 'permanent_error')`)
+    .orderBy(sql`${pages.updatedAt} desc`)
     .limit(10);
 }
 
@@ -339,7 +346,10 @@ export async function getRetryWarnings(): Promise<RetryWarning[]> {
       processedAt: pages.processedAt,
     })
     .from(pages)
-    .where(sql`${pages.retryCount} > 0`)
+    .where(and(
+      sql`${pages.retryCount} > 0`,
+      sql`${pages.status} != 'permanent_error'`,
+    ))
     .orderBy(sql`${pages.retryCount} desc`)
     .limit(10);
 }
@@ -349,6 +359,7 @@ export async function getRetryWarnings(): Promise<RetryWarning[]> {
 export type RemainingWork = {
   pending:          number;
   error:            number;
+  permanentError:   number;
   processing:       number;
   zombieCandidates: number;
 };
@@ -360,9 +371,10 @@ export async function getRemainingWork(): Promise<RemainingWork> {
 
   const rows = await db.execute(sql`
     SELECT
-      count(*) FILTER (WHERE status = 'pending')::int     AS pending,
-      count(*) FILTER (WHERE status = 'error')::int       AS error,
-      count(*) FILTER (WHERE status = 'processing')::int  AS processing,
+      count(*) FILTER (WHERE status = 'pending')::int          AS pending,
+      count(*) FILTER (WHERE status = 'error')::int            AS error,
+      count(*) FILTER (WHERE status = 'permanent_error')::int  AS permanent_error,
+      count(*) FILTER (WHERE status = 'processing')::int       AS processing,
       count(*) FILTER (
         WHERE status = 'processing'
           AND processing_started_at < ${zombieCutoffIso}::timestamptz
@@ -371,13 +383,123 @@ export async function getRemainingWork(): Promise<RemainingWork> {
   `);
 
   const row = (rows as unknown as Array<{
-    pending: unknown; error: unknown; processing: unknown; zombie_candidates: unknown;
+    pending: unknown; error: unknown; permanent_error: unknown; processing: unknown; zombie_candidates: unknown;
   }>)[0];
 
   return {
     pending:          Number(row.pending),
     error:            Number(row.error),
+    permanentError:   Number(row.permanent_error),
     processing:       Number(row.processing),
     zombieCandidates: Number(row.zombie_candidates),
   };
+}
+
+// ─── Ops: 日別サマリー（直近14日） ────────────────────────────────────────────
+
+export type DailyRow = {
+  day:             string;
+  newlyLoaded:     number;
+  processed:       number;
+  done:            number;
+  errorCount:      number;
+  retryWarning:    number;
+  stuckProcessing: number;
+  lastProcessedAt: Date | null;
+};
+
+export async function getDailySummary(): Promise<DailyRow[]> {
+  const db = getDb();
+  const rows = await db.execute(sql`
+    SELECT
+      gs.day::date                                                   AS day,
+      coalesce(loaded.newly_loaded,    0)::int                       AS newly_loaded,
+      coalesce(proc.processed,         0)::int                       AS processed,
+      coalesce(proc.done,              0)::int                       AS done,
+      coalesce(proc.error_count,       0)::int                       AS error_count,
+      coalesce(proc.retry_warning,     0)::int                       AS retry_warning,
+      coalesce(stuck.stuck_processing, 0)::int                       AS stuck_processing,
+      proc.last_processed_at
+    FROM generate_series(
+      current_date - interval '13 days',
+      current_date,
+      interval '1 day'
+    ) AS gs(day)
+    LEFT JOIN (
+      SELECT created_at::date AS day, count(*)::int AS newly_loaded
+      FROM ${pages}
+      WHERE created_at >= current_date - interval '13 days'
+      GROUP BY created_at::date
+    ) loaded ON loaded.day = gs.day::date
+    LEFT JOIN (
+      SELECT
+        processed_at::date                                                              AS day,
+        count(*)::int                                                                   AS processed,
+        count(*) FILTER (WHERE status = 'done')::int                                   AS done,
+        count(*) FILTER (WHERE status IN ('error', 'permanent_error'))::int            AS error_count,
+        count(*) FILTER (WHERE retry_count > 0 AND status != 'permanent_error')::int  AS retry_warning,
+        max(processed_at)                                                               AS last_processed_at
+      FROM ${pages}
+      WHERE processed_at >= current_date - interval '13 days'
+      GROUP BY processed_at::date
+    ) proc ON proc.day = gs.day::date
+    LEFT JOIN (
+      SELECT processing_started_at::date AS day, count(*)::int AS stuck_processing
+      FROM ${pages}
+      WHERE status = 'processing'
+        AND processing_started_at >= current_date - interval '13 days'
+      GROUP BY processing_started_at::date
+    ) stuck ON stuck.day = gs.day::date
+    ORDER BY gs.day DESC
+  `);
+
+  return (rows as unknown as Array<{
+    day: unknown; newly_loaded: unknown; processed: unknown; done: unknown;
+    error_count: unknown; retry_warning: unknown; stuck_processing: unknown;
+    last_processed_at: unknown;
+  }>).map(r => ({
+    day:             String(r.day).slice(0, 10),
+    newlyLoaded:     Number(r.newly_loaded),
+    processed:       Number(r.processed),
+    done:            Number(r.done),
+    errorCount:      Number(r.error_count),
+    retryWarning:    Number(r.retry_warning),
+    stuckProcessing: Number(r.stuck_processing),
+    lastProcessedAt: r.last_processed_at instanceof Date
+                       ? r.last_processed_at
+                       : r.last_processed_at ? new Date(String(r.last_processed_at)) : null,
+  }));
+}
+
+// ─── Ops: 新規取込ページ（直近20件） ─────────────────────────────────────────
+
+export type NewlyLoadedPage = {
+  pageId:      string;
+  title:       string | null;
+  notionDate:  string | null;
+  status:      string;
+  retryCount:  number;
+  createdAt:   Date;
+  processedAt: Date | null;
+  errorType:   string | null;
+  errorMsg:    string | null;
+};
+
+export async function getNewlyLoadedPages(): Promise<NewlyLoadedPage[]> {
+  const db = getDb();
+  return db
+    .select({
+      pageId:      pages.pageId,
+      title:       pages.title,
+      notionDate:  pages.notionDate,
+      status:      pages.status,
+      retryCount:  pages.retryCount,
+      createdAt:   pages.createdAt,
+      processedAt: pages.processedAt,
+      errorType:   pages.errorType,
+      errorMsg:    pages.errorMsg,
+    })
+    .from(pages)
+    .orderBy(sql`${pages.createdAt} desc`)
+    .limit(20);
 }

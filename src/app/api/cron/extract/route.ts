@@ -2,7 +2,7 @@ import { eq, and, lt, sql, inArray, or, isNull } from 'drizzle-orm';
 import { getDb, pages, extractions } from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { fetchNotionPages, fetchPageContent } from '@/lib/notionClient';
-import { extractTopics, generateEmbedding, toErrorType, TOPICS, type Topic } from '@/lib/geminiClient';
+import { extractTopics, generateEmbedding, toErrorType, isNonRetryable, TOPICS, type Topic } from '@/lib/geminiClient';
 import type { ErrorType } from '@/lib/db';
 
 /** Vercel Function の最大実行時間（秒）。Pro プランは 300 まで設定可能 */
@@ -31,6 +31,16 @@ export async function GET(req: Request): Promise<Response> {
 
   if (!isAuthorized) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // ── [0.5] JST 土日チェック ───────────────────────────────────────────────────
+  // Vercel Cron は UTC 実行のため、必ず Asia/Tokyo 基準で曜日を判定する
+  const jstWeekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    weekday:  'short',
+  }).format(new Date());
+  if (jstWeekday === 'Sat' || jstWeekday === 'Sun') {
+    return Response.json({ ok: true, skipped: true, reason: 'weekend_jst' });
   }
 
   const db = getDb();
@@ -235,19 +245,22 @@ export async function GET(req: Request): Promise<Response> {
       doneCount++;
 
     } catch (err) {
-      // エラーを構造化して記録（error → pending への自動復帰なし。Notion 側で更新されるか手動リセットで再試行）
       const errorType = toErrorType(err, page.retryCount) as ErrorType;
       const errorMsg  = err instanceof Error ? err.message : String(err);
 
-      await db
-        .update(pages)
-        .set({
-          status:     'error',
-          errorType,
-          errorMsg,
-          retryCount: page.retryCount + 1,
-        })
-        .where(eq(pages.pageId, page.pageId));
+      if (isNonRetryable(err)) {
+        // 404/403/401 等の恒久失敗 → permanent_error（retry_count は増やさない、次回 cron 対象外）
+        await db
+          .update(pages)
+          .set({ status: 'permanent_error', errorType, errorMsg })
+          .where(eq(pages.pageId, page.pageId));
+      } else {
+        // 一時的エラー → error（Notion 側で更新されるか手動リセットで再試行可能）
+        await db
+          .update(pages)
+          .set({ status: 'error', errorType, errorMsg, retryCount: page.retryCount + 1 })
+          .where(eq(pages.pageId, page.pageId));
+      }
 
       errorCount++;
     }

@@ -112,6 +112,13 @@ function isTransient(err: unknown): boolean {
 
 /** エラーを ErrorType 文字列に変換 */
 function toErrorType(err: unknown, attempt: number): string {
+  // Notion API エラー（duck-type: NotionApiError）
+  if (err instanceof Error && err.name === 'NotionApiError') {
+    const s = (err as unknown as { status: number }).status;
+    if (s === 404) return 'NOTION_NOT_FOUND';
+    if (s === 403 || s === 401) return 'NOTION_UNAUTHORIZED';
+    return 'NOTION_FETCH';
+  }
   if (err instanceof GoogleGenerativeAIFetchError) {
     if (err.status === 429)          return 'GEMINI_RATE_LIMIT';
     if ((err.status ?? 0) >= 500)    return 'GEMINI_API';
@@ -120,6 +127,14 @@ function toErrorType(err: unknown, attempt: number): string {
   if (err instanceof SyntaxError)   return 'GEMINI_PARSE';
   if (err instanceof Error && err.name === 'AbortError') return 'GEMINI_TIMEOUT';
   return 'UNKNOWN';
+}
+
+/** non-retryable エラー（404/403/401）かどうかを判定する */
+export function isNonRetryable(err: unknown): boolean {
+  if (err instanceof Error && err.name === 'NotionApiError') {
+    return (err as unknown as { isNonRetryable: boolean }).isNonRetryable === true;
+  }
+  return false;
 }
 
 // ─── プロンプト生成 ───────────────────────────────────────────────────────────

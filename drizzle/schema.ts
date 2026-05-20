@@ -95,11 +95,13 @@ export type NewPage    = typeof pages.$inferInsert;
 export type Extraction = typeof extractions.$inferSelect;
 
 /** pages.status の許容値 */
-export type PageStatus = 'pending' | 'processing' | 'done' | 'error';
+export type PageStatus = 'pending' | 'processing' | 'done' | 'error' | 'permanent_error';
 
 /** error_type の許容値 */
 export type ErrorType =
   | 'NOTION_FETCH'
+  | 'NOTION_NOT_FOUND'
+  | 'NOTION_UNAUTHORIZED'
   | 'GEMINI_API'
   | 'GEMINI_RATE_LIMIT'
   | 'GEMINI_TIMEOUT'

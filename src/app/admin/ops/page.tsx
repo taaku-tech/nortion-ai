@@ -4,6 +4,8 @@ import {
   getRecentErrorPages,
   getRetryWarnings,
   getRemainingWork,
+  getDailySummary,
+  getNewlyLoadedPages,
 } from '@/lib/queries';
 
 export default async function OpsPage() {
@@ -16,9 +18,11 @@ export default async function OpsPage() {
 
   const tQueries = Date.now();
   const stats         = await timedPerf('getPageStats',        getPageStats);
+  const remaining     = await timedPerf('getRemainingWork',    getRemainingWork);
+  const dailySummary  = await timedPerf('getDailySummary',     getDailySummary);
+  const newlyLoaded   = await timedPerf('getNewlyLoadedPages', getNewlyLoadedPages);
   const errorPages    = await timedPerf('getRecentErrorPages', getRecentErrorPages);
   const retryWarnings = await timedPerf('getRetryWarnings',    getRetryWarnings);
-  const remaining     = await timedPerf('getRemainingWork',    getRemainingWork);
   console.log(`[ops] queries: ${Date.now() - tQueries}ms`);
 
   const lastProcessed = formatDateTime(stats.lastProcessedAt);
@@ -41,47 +45,84 @@ export default async function OpsPage() {
         {/* 1. Extraction Health Summary */}
         <section>
           <h2 className="text-lg font-semibold text-gray-700 mb-3">Extraction Health Summary</h2>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-            <StatCard label="total"      value={stats.total}      />
-            <StatCard label="done"       value={stats.done}       color="text-green-600" />
-            <StatCard label="pending"    value={stats.pending}    color="text-yellow-600" />
-            <StatCard label="processing" value={stats.processing} color="text-blue-600" />
-            <StatCard label="error"      value={stats.error}      color="text-red-600" />
-            <StatCard label="最終処理"   value={lastProcessed}    small />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard label="total"           value={stats.total}          />
+            <StatCard label="done"            value={stats.done}           color="text-green-600" />
+            <StatCard label="pending"         value={stats.pending}        color="text-yellow-600" />
+            <StatCard label="error"           value={stats.error}          color="text-red-600" />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
+            <StatCard label="processing"      value={stats.processing}     color="text-blue-600" />
+            <StatCard label="permanent_error" value={stats.permanentError} color="text-purple-700" />
+            <StatCard label="最終処理"         value={lastProcessed}        small />
           </div>
         </section>
 
-        {/* 2. Recent Error Pages */}
+        {/* 2. Remaining Work */}
         <section>
-          <h2 className="text-lg font-semibold text-gray-700 mb-3">
-            Recent Error Pages（最新 10 件）
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">Remaining Work</h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <StatCard label="pending"         value={remaining.pending}          color="text-yellow-600" />
+            <StatCard label="error"           value={remaining.error}            color="text-red-600" />
+            <StatCard label="permanent_error" value={remaining.permanentError}   color="text-purple-700" />
+            <StatCard label="processing"      value={remaining.processing}       color="text-blue-600" />
+            <StatCard label="zombie 候補"      value={remaining.zombieCandidates} color="text-purple-600" />
+          </div>
+        </section>
+
+        {/* 3. Daily Summary */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">Daily Summary（直近 14 日）</h2>
           <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-100">
                 <tr>
-                  <Th>タイトル</Th>
                   <Th>日付</Th>
-                  <Th>retry</Th>
-                  <Th>error_type</Th>
-                  <Th>error_msg</Th>
-                  <Th>processed_at</Th>
+                  <Th className="text-right">新規取込</Th>
+                  <Th className="text-right">処理</Th>
+                  <Th className="text-right">done</Th>
+                  <Th className="text-right">error</Th>
+                  <Th className="text-right">retry ⚠</Th>
+                  <Th className="text-right">stuck</Th>
+                  <Th>last processed</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {errorPages.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-gray-400">エラーなし</td>
-                  </tr>
-                ) : errorPages.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    <Td className="max-w-xs truncate">{row.title ?? '—'}</Td>
-                    <Td className="whitespace-nowrap">{row.notionDate ?? '—'}</Td>
-                    <Td className="text-center font-mono text-red-600">{row.retryCount}</Td>
-                    <Td className="whitespace-nowrap font-mono text-xs">{row.errorType ?? '—'}</Td>
-                    <Td className="max-w-sm text-xs text-gray-600 whitespace-pre-wrap">{row.errorMsg ?? '—'}</Td>
-                    <Td className="whitespace-nowrap text-gray-500">
-                      {formatDateTime(row.processedAt)}
+                {dailySummary.map((row) => (
+                  <tr key={row.day} className="hover:bg-gray-50">
+                    <Td className="font-mono whitespace-nowrap">{row.day}</Td>
+                    <Td className="text-right">
+                      {row.newlyLoaded > 0
+                        ? <span className="text-blue-600 font-medium">{row.newlyLoaded}</span>
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-right">
+                      {row.processed > 0
+                        ? row.processed
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-right">
+                      {row.done > 0
+                        ? <span className="text-green-600">{row.done}</span>
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-right">
+                      {row.errorCount > 0
+                        ? <span className="text-red-600 font-medium">{row.errorCount}</span>
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-right">
+                      {row.retryWarning > 0
+                        ? <span className="text-orange-500">{row.retryWarning}</span>
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-right">
+                      {row.stuckProcessing > 0
+                        ? <span className="text-purple-600 font-bold">{row.stuckProcessing}</span>
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-xs text-gray-400 whitespace-nowrap">
+                      {formatDateTime(row.lastProcessedAt)}
                     </Td>
                   </tr>
                 ))}
@@ -90,10 +131,90 @@ export default async function OpsPage() {
           </div>
         </section>
 
-        {/* 3. Retry Warnings */}
+        {/* 4. Newly Loaded Pages */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">Newly Loaded Pages（直近 20 件）</h2>
+          <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <Th>タイトル</Th>
+                  <Th>Notion日付</Th>
+                  <Th>status</Th>
+                  <Th className="text-center">retry</Th>
+                  <Th>取込日時</Th>
+                  <Th>処理日時</Th>
+                  <Th>error_type</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {newlyLoaded.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-6 text-center text-gray-400">データなし</td>
+                  </tr>
+                ) : newlyLoaded.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <Td className="max-w-xs truncate">{row.title ?? '—'}</Td>
+                    <Td className="whitespace-nowrap">{row.notionDate ?? '—'}</Td>
+                    <Td><StatusBadge status={row.status} /></Td>
+                    <Td className="text-center font-mono">
+                      {row.retryCount > 0
+                        ? <span className="text-orange-600 font-bold">{row.retryCount}</span>
+                        : <span>{row.retryCount}</span>}
+                    </Td>
+                    <Td className="text-xs text-gray-500 whitespace-nowrap">{formatDateTime(row.createdAt)}</Td>
+                    <Td className="text-xs text-gray-500 whitespace-nowrap">{formatDateTime(row.processedAt)}</Td>
+                    <Td className="text-xs font-mono text-red-600">{row.errorType ?? '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* 5. Recent Error Pages */}
         <section>
           <h2 className="text-lg font-semibold text-gray-700 mb-3">
-            Retry Warnings（retry_count 上位 10 件）
+            Recent Error Pages（error + permanent_error 最新 10 件）
+          </h2>
+          <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <Th>タイトル</Th>
+                  <Th>status</Th>
+                  <Th>Notion日付</Th>
+                  <Th>エラー検出日時</Th>
+                  <Th className="text-center">retry</Th>
+                  <Th>error_type</Th>
+                  <Th>error_msg</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {errorPages.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-6 text-center text-gray-400">エラーなし</td>
+                  </tr>
+                ) : errorPages.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <Td className="max-w-xs truncate">{row.title ?? '—'}</Td>
+                    <Td><StatusBadge status={row.status} /></Td>
+                    <Td className="whitespace-nowrap">{row.notionDate ?? '—'}</Td>
+                    <Td className="whitespace-nowrap text-gray-500 text-xs">{formatDateTime(row.updatedAt)}</Td>
+                    <Td className="text-center font-mono text-red-600">{row.retryCount}</Td>
+                    <Td className="whitespace-nowrap font-mono text-xs">{row.errorType ?? '—'}</Td>
+                    <Td className="max-w-sm text-xs text-gray-600 whitespace-pre-wrap">{row.errorMsg ?? '—'}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* 6. Retry Warnings */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-700 mb-3">
+            Retry Warnings（retry_count 上位 10 件、permanent_error 除く）
           </h2>
           <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
             <table className="min-w-full text-sm">
@@ -124,17 +245,6 @@ export default async function OpsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        </section>
-
-        {/* 4. Remaining Work */}
-        <section>
-          <h2 className="text-lg font-semibold text-gray-700 mb-3">Remaining Work</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="pending"           value={remaining.pending}          color="text-yellow-600" />
-            <StatCard label="error"             value={remaining.error}            color="text-red-600" />
-            <StatCard label="processing"        value={remaining.processing}       color="text-blue-600" />
-            <StatCard label="zombie 候補"        value={remaining.zombieCandidates} color="text-purple-600" />
           </div>
         </section>
 
@@ -182,10 +292,11 @@ function StatCard({
 }
 
 const STATUS_STYLE: Record<string, string> = {
-  pending:    'bg-yellow-100 text-yellow-800',
-  processing: 'bg-blue-100 text-blue-800',
-  done:       'bg-green-100 text-green-800',
-  error:      'bg-red-100 text-red-800',
+  pending:         'bg-yellow-100 text-yellow-800',
+  processing:      'bg-blue-100 text-blue-800',
+  done:            'bg-green-100 text-green-800',
+  error:           'bg-red-100 text-red-800',
+  permanent_error: 'bg-purple-100 text-purple-800',
 };
 
 function StatusBadge({ status }: { status: string }) {

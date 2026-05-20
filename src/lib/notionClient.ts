@@ -1,6 +1,19 @@
 import { createHash } from 'crypto';
 import { getConfig } from './config';
 
+// ─── Notion API エラークラス ──────────────────────────────────────────────────
+
+export class NotionApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly isNonRetryable: boolean,
+  ) {
+    super(message);
+    this.name = 'NotionApiError';
+  }
+}
+
 // ─── 型定義 ───────────────────────────────────────────────────────────────────
 
 export interface NotionPageMeta {
@@ -85,7 +98,8 @@ export async function fetchNotionPages(): Promise<NotionPageMeta[]> {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Notion DB query failed: ${res.status} ${text}`);
+      const nonRetryable = res.status === 404 || res.status === 403 || res.status === 401;
+      throw new NotionApiError(`Notion DB query failed: ${res.status} ${text}`, res.status, nonRetryable);
     }
 
     const data = await res.json() as {
@@ -120,7 +134,8 @@ export async function fetchPageContent(pageId: string): Promise<NotionPageConten
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Notion blocks fetch failed: ${res.status} ${text}`);
+    const nonRetryable = res.status === 404 || res.status === 403 || res.status === 401;
+    throw new NotionApiError(`Notion blocks fetch failed: ${res.status} ${text}`, res.status, nonRetryable);
   }
 
   const data = await res.json() as { results: NotionBlock[] };
