@@ -65,6 +65,11 @@
   - Recent Error Pages 改善（Notion日付 ≠ エラー検出日時 を明示分離、permanent_error 対応）
   - Retry Warnings から permanent_error を除外
   - Health Summary / Remaining Work に permanent_error カード追加
+- [x] `/api/cron/extract` 運用ログ追加
+  - `[cron:extract]` プレフィックスで統一（start / skip / zombie reset / targets selected / page start / page done / end）
+  - zombie reset 件数・対象ページ（最大5件）をログ出力
+  - 各ページの処理開始・完了・エラー種別を記録
+  - Vercel Runtime Logs でゾンビリセット動作と stuck 原因の切り分けが可能に
 - [ ] セマンティック検索 UI（類似事例探索、/search への類似検索追加）
 - [ ] HNSW インデックス（ページ数増加時のベクトル検索高速化）
 - [ ] RAG による「過去の類似商談を参照しながらの提案支援」
@@ -79,7 +84,7 @@
 
 ---
 
-## 現在の実装状況（2026-05-20 時点）
+## 現在の実装状況（2026-05-22 時点）
 
 ### 本番稼働中
 
@@ -91,6 +96,7 @@
 | extraction retry policy（retryable / non-retryable 分類） | ✅ |
 | `/admin` ダッシュボード | ✅ |
 | `/admin/ops` 運用監視（Daily Summary / Newly Loaded Pages 追加済み） | ✅ |
+| `/api/cron/extract` 運用ログ（`[cron:extract]` prefix、zombie/page/end） | ✅ |
 | `/admin/customers` 顧客別一覧（スマホ対応済み） | ✅ |
 | `/search` キーワード検索（スマホ対応済み） | ✅ |
 | `/login` ブランディング・説明文 | ✅ |
@@ -132,7 +138,7 @@
 - **手動 migration**: `drizzle-kit migrate` は使わず Supabase SQL Editor で手動適用
 - **embedding**: 3072次元を `.slice(0, 768)` で切り詰め保存（Matryoshka 方式）。類似検索は未実装
 - **permanent_error**: Notion 404/403/401 等の恒久失敗は `permanent_error` に分類し、retry_count を増やさず次回 cron 対象からも除外する。zombie検出・Retry Warnings の対象外
-- **Cron 土日スキップ**: JST 曜日で判定。Vercel Cron は UTC 実行のため `Intl.DateTimeFormat` で Asia/Tokyo 変換後に判定
+- **Cron スケジュール**: `0 23 * * 0-4`（UTC 日〜木 = JST 月〜金 08:00）。JST 土日の手動実行はコード側でもスキップ（安全装置）
 
 ---
 

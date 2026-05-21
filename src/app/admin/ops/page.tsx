@@ -271,7 +271,7 @@ async function timedPerf<T>(label: string, fn: () => Promise<T>): Promise<T> {
 
 function formatDateTime(value: string | Date | null | undefined): string {
   if (!value) return '—';
-  if (value instanceof Date) return value.toLocaleString('ja-JP');
+  if (value instanceof Date) return value.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) + ' JST';
   return value;
 }
 

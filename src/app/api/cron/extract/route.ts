@@ -1,9 +1,10 @@
-import { eq, and, lt, sql, inArray, or, isNull } from 'drizzle-orm';
+import { eq, and, lt, gte, sql, inArray, or, isNull } from 'drizzle-orm';
 import { getDb, pages, extractions } from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { fetchNotionPages, fetchPageContent } from '@/lib/notionClient';
 import { extractTopics, generateEmbedding, toErrorType, isNonRetryable, TOPICS, type Topic } from '@/lib/geminiClient';
 import type { ErrorType } from '@/lib/db';
+import { sendOpsSummaryEmail } from '@/lib/email/opsSummaryMailer';
 
 /** Vercel Function の最大実行時間（秒）。Pro プランは 300 まで設定可能 */
 export const maxDuration = 60;
@@ -39,7 +40,12 @@ export async function GET(req: Request): Promise<Response> {
     timeZone: 'Asia/Tokyo',
     weekday:  'short',
   }).format(new Date());
-  if (jstWeekday === 'Sat' || jstWeekday === 'Sun') {
+  const isWeekendJst = jstWeekday === 'Sat' || jstWeekday === 'Sun';
+
+  console.log('[cron:extract] start', { startedAt: new Date().toISOString(), weekdayJst: jstWeekday, isWeekendJst });
+
+  if (isWeekendJst) {
+    console.log('[cron:extract] skip', { reason: 'weekend_jst' });
     return Response.json({ ok: true, skipped: true, reason: 'weekend_jst' });
   }
 
@@ -59,9 +65,13 @@ export async function GET(req: Request): Promise<Response> {
         lt(pages.processingStartedAt, zombieCutoff),
       ),
     )
-    .returning({ pageId: pages.pageId });
+    .returning({ pageId: pages.pageId, title: pages.title });
 
   const zombieCount = zombieRows.length;
+  console.log('[cron:extract] zombie reset', {
+    count: zombieCount,
+    pages: zombieRows.slice(0, 5).map((r) => ({ pageId: r.pageId, title: r.title })),
+  });
 
   // ── [2] Notion 同期（メタ情報のみ取得） ────────────────────────────────────
   let notionPages: Awaited<ReturnType<typeof fetchNotionPages>>;
@@ -141,6 +151,12 @@ export async function GET(req: Request): Promise<Response> {
     .limit(processing.batchSize)
     .for('update', { skipLocked: true });
 
+  console.log('[cron:extract] targets selected', {
+    count:           targets.length,
+    pending:         targets.filter((p) => p.status === 'pending').length,
+    doneNoEmbedding: targets.filter((p) => p.status === 'done').length,
+  });
+
   let doneCount     = 0;
   let errorCount    = 0;
   let skippedCount  = 0;
@@ -152,6 +168,13 @@ export async function GET(req: Request): Promise<Response> {
       .update(pages)
       .set({ status: 'processing', processingStartedAt: now })
       .where(eq(pages.pageId, page.pageId));
+
+    console.log('[cron:extract] page start', {
+      pageId:         page.pageId,
+      title:          page.title,
+      previousStatus: page.status,
+      retryCount:     page.retryCount,
+    });
 
     try {
       // 本文取得
@@ -180,9 +203,9 @@ export async function GET(req: Request): Promise<Response> {
 
       // extraction・embedding ともにスキップ可能 → done
       if (extractionSkipped && embeddingSkipped) {
-        console.log('[extract] skipped unchanged page:', { pageId: page.pageId, title: page.title });
         await db.update(pages).set({ status: 'done' }).where(eq(pages.pageId, page.pageId));
         skippedCount++;
+        console.log('[cron:extract] page done', { pageId: page.pageId, result: 'skipped' });
         continue;
       }
 
@@ -193,6 +216,7 @@ export async function GET(req: Request): Promise<Response> {
           .set({ status: 'done', content: '', contentHash, contentLength, processedAt: now })
           .where(eq(pages.pageId, page.pageId));
         doneCount++;
+        console.log('[cron:extract] page done', { pageId: page.pageId, result: 'done', note: 'empty_text' });
         continue;
       }
 
@@ -243,12 +267,14 @@ export async function GET(req: Request): Promise<Response> {
         .where(eq(pages.pageId, page.pageId));
 
       doneCount++;
+      console.log('[cron:extract] page done', { pageId: page.pageId, result: 'done' });
 
     } catch (err) {
-      const errorType = toErrorType(err, page.retryCount) as ErrorType;
-      const errorMsg  = err instanceof Error ? err.message : String(err);
+      const errorType    = toErrorType(err, page.retryCount) as ErrorType;
+      const errorMsg     = err instanceof Error ? err.message : String(err);
+      const nonRetryable = isNonRetryable(err);
 
-      if (isNonRetryable(err)) {
+      if (nonRetryable) {
         // 404/403/401 等の恒久失敗 → permanent_error（retry_count は増やさない、次回 cron 対象外）
         await db
           .update(pages)
@@ -263,6 +289,12 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       errorCount++;
+      console.log('[cron:extract] page done', {
+        pageId:    page.pageId,
+        result:    nonRetryable ? 'permanent_error' : 'error',
+        errorType,
+        errorMsg:  errorMsg.slice(0, 200),
+      });
     }
 
     await sleep(processing.sleepMs);
@@ -278,6 +310,84 @@ export async function GET(req: Request): Promise<Response> {
     .select({ missingEmbedding: sql<number>`count(*)::int` })
     .from(pages)
     .where(and(eq(pages.status, 'done'), isNull(pages.embedding)));
+
+  console.log('[cron:extract] end', {
+    done:               doneCount,
+    error:              errorCount,
+    skipped:            skippedCount,
+    embeddingGenerated: embeddedCount,
+    zombieReset:        zombieCount,
+    remaining,
+    missingEmbedding,
+  });
+
+  // ── [5] メール送信 ─────────────────────────────────────────────────────────
+  const { email: emailCfg } = getConfig();
+  const { resendApiKey, to: emailTo, from: emailFrom } = emailCfg;
+
+  if (emailTo && resendApiKey && emailFrom) {
+    try {
+      // JST 今日の開始時刻（00:00:00 JST = UTC-9h）
+      const jstTodayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(now);
+      const jstDayStart = new Date(`${jstTodayStr}T00:00:00+09:00`);
+
+      // 本日新規取込ページ（createdAt が今日 JST 以降。任意 status）
+      const newlyLoadedRows = await db
+        .select({ title: pages.title, notionDate: pages.notionDate, status: pages.status, errorType: pages.errorType, errorMsg: pages.errorMsg })
+        .from(pages)
+        .where(gte(pages.createdAt, jstDayStart))
+        .orderBy(pages.createdAt);
+
+      // 本日処理完了ページ（processedAt が今日 JST 以降 かつ done）
+      const processedTodayRows = await db
+        .select({ title: pages.title, notionDate: pages.notionDate, status: pages.status, errorType: pages.errorType, errorMsg: pages.errorMsg })
+        .from(pages)
+        .where(and(gte(pages.processedAt, jstDayStart), eq(pages.status, 'done')))
+        .orderBy(pages.processedAt);
+
+      // 本日エラーページ（updatedAt が今日 JST 以降 かつ error）
+      const errorTodayRows = await db
+        .select({ title: pages.title, notionDate: pages.notionDate, status: pages.status, errorType: pages.errorType, errorMsg: pages.errorMsg })
+        .from(pages)
+        .where(and(gte(pages.updatedAt, jstDayStart), eq(pages.status, 'error')))
+        .orderBy(pages.updatedAt);
+
+      // permanent_error 全件
+      const permanentErrorRows = await db
+        .select({ title: pages.title, notionDate: pages.notionDate, status: pages.status, errorType: pages.errorType, errorMsg: pages.errorMsg })
+        .from(pages)
+        .where(eq(pages.status, 'permanent_error'))
+        .orderBy(pages.updatedAt);
+
+      // stuck count（現時点で processing のまま残っているページ数）
+      const [{ stuckCount }] = await db
+        .select({ stuckCount: sql<number>`count(*)::int` })
+        .from(pages)
+        .where(eq(pages.status, 'processing'));
+
+      await sendOpsSummaryEmail(
+        {
+          executedAt:          now,
+          done:                doneCount,
+          error:               errorCount,
+          skipped:             skippedCount,
+          embeddingGenerated:  embeddedCount,
+          zombieReset:         zombieCount,
+          remaining,
+          newlyLoadedPages:    newlyLoadedRows,
+          processedTodayPages: processedTodayRows,
+          errorTodayPages:     errorTodayRows,
+          permanentErrorPages: permanentErrorRows,
+          stuckCount,
+        },
+        { apiKey: resendApiKey, to: emailTo, from: emailFrom },
+      );
+
+      console.log('[cron:extract] email sent', { to: emailTo });
+    } catch (err) {
+      console.warn('[cron:extract] email send failed', { error: String(err).slice(0, 200) });
+    }
+  }
 
   return Response.json({
     ok:              true,

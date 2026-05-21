@@ -52,6 +52,11 @@ function buildConfig() {
       zombieTimeoutMin: parseInt(process.env.ZOMBIE_TIMEOUT_MIN ?? '15',   10),
       maxRetries:       3,
     },
+    email: {
+      resendApiKey: process.env.RESEND_API_KEY           ?? null,
+      to:           process.env.OPS_SUMMARY_EMAIL_TO     ?? null,
+      from:         process.env.OPS_SUMMARY_EMAIL_FROM   ?? null,
+    },
   } as const;
 }
 
