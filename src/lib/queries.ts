@@ -421,34 +421,34 @@ export async function getDailySummary(): Promise<DailyRow[]> {
       coalesce(stuck.stuck_processing, 0)::int                       AS stuck_processing,
       proc.last_processed_at
     FROM generate_series(
-      current_date - interval '13 days',
-      current_date,
+      (NOW() AT TIME ZONE 'Asia/Tokyo')::date - interval '13 days',
+      (NOW() AT TIME ZONE 'Asia/Tokyo')::date,
       interval '1 day'
     ) AS gs(day)
     LEFT JOIN (
-      SELECT created_at::date AS day, count(*)::int AS newly_loaded
+      SELECT (created_at AT TIME ZONE 'Asia/Tokyo')::date AS day, count(*)::int AS newly_loaded
       FROM ${pages}
-      WHERE created_at >= current_date - interval '13 days'
-      GROUP BY created_at::date
+      WHERE (created_at AT TIME ZONE 'Asia/Tokyo')::date >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date - interval '13 days'
+      GROUP BY (created_at AT TIME ZONE 'Asia/Tokyo')::date
     ) loaded ON loaded.day = gs.day::date
     LEFT JOIN (
       SELECT
-        processed_at::date                                                              AS day,
-        count(*)::int                                                                   AS processed,
-        count(*) FILTER (WHERE status = 'done')::int                                   AS done,
-        count(*) FILTER (WHERE status IN ('error', 'permanent_error'))::int            AS error_count,
-        count(*) FILTER (WHERE retry_count > 0 AND status != 'permanent_error')::int  AS retry_warning,
-        max(processed_at)                                                               AS last_processed_at
+        (processed_at AT TIME ZONE 'Asia/Tokyo')::date                                         AS day,
+        count(*)::int                                                                           AS processed,
+        count(*) FILTER (WHERE status = 'done')::int                                           AS done,
+        count(*) FILTER (WHERE status IN ('error', 'permanent_error'))::int                    AS error_count,
+        count(*) FILTER (WHERE retry_count > 0 AND status != 'permanent_error')::int          AS retry_warning,
+        max(processed_at)                                                                       AS last_processed_at
       FROM ${pages}
-      WHERE processed_at >= current_date - interval '13 days'
-      GROUP BY processed_at::date
+      WHERE (processed_at AT TIME ZONE 'Asia/Tokyo')::date >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date - interval '13 days'
+      GROUP BY (processed_at AT TIME ZONE 'Asia/Tokyo')::date
     ) proc ON proc.day = gs.day::date
     LEFT JOIN (
-      SELECT processing_started_at::date AS day, count(*)::int AS stuck_processing
+      SELECT (processing_started_at AT TIME ZONE 'Asia/Tokyo')::date AS day, count(*)::int AS stuck_processing
       FROM ${pages}
       WHERE status = 'processing'
-        AND processing_started_at >= current_date - interval '13 days'
-      GROUP BY processing_started_at::date
+        AND (processing_started_at AT TIME ZONE 'Asia/Tokyo')::date >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date - interval '13 days'
+      GROUP BY (processing_started_at AT TIME ZONE 'Asia/Tokyo')::date
     ) stuck ON stuck.day = gs.day::date
     ORDER BY gs.day DESC
   `);
