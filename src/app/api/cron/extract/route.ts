@@ -274,18 +274,26 @@ export async function GET(req: Request): Promise<Response> {
       const errorMsg     = err instanceof Error ? err.message : String(err);
       const nonRetryable = isNonRetryable(err);
 
-      if (nonRetryable) {
-        // 404/403/401 等の恒久失敗 → permanent_error（retry_count は増やさない、次回 cron 対象外）
-        await db
-          .update(pages)
-          .set({ status: 'permanent_error', errorType, errorMsg })
-          .where(eq(pages.pageId, page.pageId));
-      } else {
-        // 一時的エラー → error（Notion 側で更新されるか手動リセットで再試行可能）
-        await db
-          .update(pages)
-          .set({ status: 'error', errorType, errorMsg, retryCount: page.retryCount + 1 })
-          .where(eq(pages.pageId, page.pageId));
+      try {
+        if (nonRetryable) {
+          // 404/403/401 等の恒久失敗 → permanent_error（retry_count は増やさない、次回 cron 対象外）
+          await db
+            .update(pages)
+            .set({ status: 'permanent_error', errorType, errorMsg })
+            .where(eq(pages.pageId, page.pageId));
+        } else {
+          // 一時的エラー → error（Notion 側で更新されるか手動リセットで再試行可能）
+          await db
+            .update(pages)
+            .set({ status: 'error', errorType, errorMsg, retryCount: page.retryCount + 1 })
+            .where(eq(pages.pageId, page.pageId));
+        }
+      } catch (dbErr) {
+        console.error('[cron:extract] page status update failed', {
+          pageId:    page.pageId,
+          errorType,
+          error:     String(dbErr).slice(0, 200),
+        });
       }
 
       errorCount++;
