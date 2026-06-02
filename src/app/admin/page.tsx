@@ -241,11 +241,16 @@ function StatCard({
 }
 
 function TopicCard({ topic, count }: { topic: string; count: number }) {
+  const href = `/search?topic=${encodeURIComponent(topic)}&applicable=1`;
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
+    <a
+      href={href}
+      className="block bg-white rounded-lg border border-gray-200 p-4 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+    >
       <p className="text-xs text-gray-500 mb-1">{topic}</p>
       <p className="text-2xl font-bold text-blue-600">{count}</p>
-    </div>
+    </a>
   );
 }
 
