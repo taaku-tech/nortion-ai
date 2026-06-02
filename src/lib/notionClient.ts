@@ -74,7 +74,7 @@ function buildHeaders(): Record<string, string> {
  * ページネーション対応（100件 × N ページ）。
  * 本文テキストは取得しない（処理フェーズで個別取得）。
  */
-export async function fetchNotionPages(): Promise<NotionPageMeta[]> {
+export async function fetchNotionPages(filterFrom?: Date | null): Promise<NotionPageMeta[]> {
   const { notion } = getConfig();
   const url = `https://api.notion.com/v1/databases/${notion.databaseId}/query`;
   const headers = buildHeaders();
@@ -85,8 +85,17 @@ export async function fetchNotionPages(): Promise<NotionPageMeta[]> {
 
   while (hasMore) {
     const body: Record<string, unknown> = { page_size: 100 };
+    if (filterFrom) {
+      body.filter = {
+        timestamp: 'last_edited_time',
+        last_edited_time: {
+          on_or_after: filterFrom.toISOString(),
+        },
+      };
+      body.sorts = [{ timestamp: 'last_edited_time', direction: 'ascending' }];
+    }
     if (notion.dateProperty) {
-      body.sorts = [{ property: notion.dateProperty, direction: 'descending' }];
+      body.sorts ??= [{ property: notion.dateProperty, direction: 'descending' }];
     }
     if (nextCursor) body.start_cursor = nextCursor;
 

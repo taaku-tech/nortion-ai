@@ -113,12 +113,14 @@ function isTransient(err: unknown): boolean {
 /** エラーを ErrorType 文字列に変換 */
 function toErrorType(err: unknown, attempt: number): string {
   // Notion API エラー（duck-type: NotionApiError）
-  if (err instanceof Error && err.name === 'NotionApiError') {
-    const s = (err as unknown as { status: number }).status;
+  if (isNotionApiErrorLike(err)) {
+    const s = err.status;
     if (s === 404) return 'NOTION_NOT_FOUND';
     if (s === 403 || s === 401) return 'NOTION_UNAUTHORIZED';
     return 'NOTION_FETCH';
   }
+  if (isNotionNotFoundMessage(err)) return 'NOTION_NOT_FOUND';
+  if (isNotionUnauthorizedMessage(err)) return 'NOTION_UNAUTHORIZED';
   if (err instanceof GoogleGenerativeAIFetchError) {
     if (err.status === 429)          return 'GEMINI_RATE_LIMIT';
     if ((err.status ?? 0) >= 500)    return 'GEMINI_API';
@@ -131,10 +133,40 @@ function toErrorType(err: unknown, attempt: number): string {
 
 /** non-retryable エラー（404/403/401）かどうかを判定する */
 export function isNonRetryable(err: unknown): boolean {
-  if (err instanceof Error && err.name === 'NotionApiError') {
-    return (err as unknown as { isNonRetryable: boolean }).isNonRetryable === true;
+  if (isNotionApiErrorLike(err)) {
+    return err.isNonRetryable === true;
   }
+  if (isNotionNotFoundMessage(err)) return true;
+  if (isNotionUnauthorizedMessage(err)) return true;
   return false;
+}
+
+function isNotionApiErrorLike(err: unknown): err is { name: 'NotionApiError'; status: number; isNonRetryable: boolean } {
+  if (typeof err !== 'object' || err === null) return false;
+  const candidate = err as { name?: unknown; status?: unknown };
+  return candidate.name === 'NotionApiError' && typeof candidate.status === 'number';
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return typeof err === 'string' ? err : '';
+}
+
+function isNotionNotFoundMessage(err: unknown): boolean {
+  const message = getErrorMessage(err);
+  return message.includes('Notion blocks fetch failed: 404')
+    || message.includes('"status":404')
+    || message.includes('"code":"object_not_found"');
+}
+
+function isNotionUnauthorizedMessage(err: unknown): boolean {
+  const message = getErrorMessage(err);
+  return message.includes('Notion blocks fetch failed: 403')
+    || message.includes('Notion blocks fetch failed: 401')
+    || message.includes('"status":403')
+    || message.includes('"status":401')
+    || message.includes('"code":"unauthorized"')
+    || message.includes('"code":"restricted_resource"');
 }
 
 // ─── プロンプト生成 ───────────────────────────────────────────────────────────

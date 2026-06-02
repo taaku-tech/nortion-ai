@@ -30,6 +30,7 @@ function buildConfig() {
     notion: {
       token:           required.NOTION_TOKEN!,
       databaseId:      required.NOTION_DATABASE_ID!,
+      opsLogPageId:    process.env.NOTION_OPS_LOG_PAGE_ID    ?? null,
       apiVersion:      process.env.NOTION_API_VERSION       ?? '2022-06-28',
       dateProperty:    process.env.NOTION_DATE_PROPERTY     ?? '日付',
       databaseViewUrl: process.env.NOTION_DATABASE_VIEW_URL ?? null,
@@ -51,11 +52,6 @@ function buildConfig() {
       sleepMs:          parseInt(process.env.SLEEP_MS          ?? '1000', 10),
       zombieTimeoutMin: parseInt(process.env.ZOMBIE_TIMEOUT_MIN ?? '15',   10),
       maxRetries:       3,
-    },
-    email: {
-      resendApiKey: process.env.RESEND_API_KEY           ?? null,
-      to:           process.env.OPS_SUMMARY_EMAIL_TO     ?? null,
-      from:         process.env.OPS_SUMMARY_EMAIL_FROM   ?? null,
     },
   } as const;
 }

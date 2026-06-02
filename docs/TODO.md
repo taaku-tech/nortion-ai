@@ -4,15 +4,12 @@
 
 ---
 
-## 優先度: 高（Phase 3 準備）
+## 優先度: 高（Phase 3 継続）
 
 ### Embeddings / セマンティック検索
 
-- [ ] pgvector 拡張の有効化（Supabase SQL Editor）
-- [ ] `extractions.embedding` カラム追加
-- [ ] Gemini Embedding API による埋め込み生成
-- [ ] Cron 処理への embedding 生成ステップ追加
 - [ ] 類似事例検索の実装（`/search` に追加）
+- [ ] HNSW インデックス追加（ページ数増加時のベクトル検索高速化）
 
 ---
 
@@ -39,6 +36,7 @@
 - [ ] Cron 失敗時のアラート（Slack 通知等）
 - [ ] DB 接続確認を含むヘルスチェック（`/api/health` の強化）
 - [ ] Vercel Log Drains / Sentry 導入
+- [ ] permanent_error ページの一括リセット UI（現状は SQL 手動実行のみ）
 
 ---
 
@@ -66,7 +64,7 @@
 ## 技術的負債
 
 - [ ] `scripts/` の診断スクリプトをテストとして整備
-- [ ] `npx tsc --noEmit` の CI 組み込み
+- [ ] `npm run verify:build` の CI 組み込み
 
 ---
 

@@ -133,6 +133,6 @@ export async function sendOpsSummaryEmail(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Resend API error: ${res.status} ${body.slice(0, 100)}`);
+    throw new Error(`Resend API error: ${res.status} ${body.slice(0, 1000)}`);
   }
 }

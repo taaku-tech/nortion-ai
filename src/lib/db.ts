@@ -27,8 +27,8 @@ export function getDb() {
 // 各モジュールが drizzle-orm から直接 import しなくて済むよう一元化する
 
 export { eq, and, lt, sql, inArray };
-export { pages, extractions } from '../../drizzle/schema';
-export type { Page, NewPage, Extraction, PageStatus, ErrorType } from '../../drizzle/schema';
+export { pages, extractions, cronSyncState } from '../../drizzle/schema';
+export type { Page, NewPage, Extraction, CronSyncState, PageStatus, ErrorType } from '../../drizzle/schema';
 
 // ─── SELECT FOR UPDATE SKIP LOCKED の使用例（型確認用コメント） ───────────────
 //

@@ -88,11 +88,21 @@ export const extractions = notionAi.table(
   ],
 );
 
+export const cronSyncState = notionAi.table(
+  'cron_sync_state',
+  {
+    name:                 text('name').primaryKey(),
+    lastSuccessfulSyncAt: timestamp('last_successful_sync_at', { withTimezone: true }),
+    updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+
 // ─── 型エクスポート ────────────────────────────────────────────────────────────
 
 export type Page       = typeof pages.$inferSelect;
 export type NewPage    = typeof pages.$inferInsert;
 export type Extraction = typeof extractions.$inferSelect;
+export type CronSyncState = typeof cronSyncState.$inferSelect;
 
 /** pages.status の許容値 */
 export type PageStatus = 'pending' | 'processing' | 'done' | 'error' | 'permanent_error';
