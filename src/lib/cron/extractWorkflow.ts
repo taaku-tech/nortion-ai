@@ -1,5 +1,5 @@
 import { eq, and, lt, gte, sql, inArray, or, isNull } from 'drizzle-orm';
-import { getDb, pages, extractions, cronSyncState, type Page } from '@/lib/db';
+import { getDb, pages, extractions, processingEvents, cronSyncState, type Page } from '@/lib/db';
 import { getConfig } from '@/lib/config';
 import { fetchNotionPages, fetchPageContent } from '@/lib/notionClient';
 import { extractTopics, generateEmbedding, toErrorType, isNonRetryable, TOPICS, type Topic } from '@/lib/geminiClient';
@@ -533,13 +533,23 @@ export async function processOnePage(db: Db, page: Page, now: Date): Promise<Pro
 
     if (!text.trim()) {
       const dbUpdateStartedAt = Date.now();
-      await db
-        .update(pages)
-        .set({ status: 'done', content: '', contentHash, contentLength: contentLength ?? 0, processedAt: now, processingStartedAt: null })
-        .where(and(
-          eq(pages.pageId, page.pageId),
-          eq(pages.status, 'processing'),
-        ));
+      await db.transaction(async (tx) => {
+        const completed = await tx
+          .update(pages)
+          .set({ status: 'done', content: '', contentHash, contentLength: contentLength ?? 0, processedAt: now, processingStartedAt: null })
+          .where(and(
+            eq(pages.pageId, page.pageId),
+            eq(pages.status, 'processing'),
+          ))
+          .returning({ pageId: pages.pageId });
+        if (completed.length > 0) {
+          await tx.insert(processingEvents).values({
+            pageId: page.pageId,
+            completedAt: now,
+            isReprocessing: page.processedAt !== null,
+          });
+        }
+      });
       timing.dbUpdateMs += Date.now() - dbUpdateStartedAt;
       timing.totalMs = Date.now() - pageStartedAt;
       console.log('[cron:process-pages] page timing', { pageId: page.pageId, ...timing });
@@ -581,23 +591,33 @@ export async function processOnePage(db: Db, page: Page, now: Date): Promise<Pro
     timing.embeddingMs = Date.now() - embeddingStartedAt;
 
     const dbUpdateStartedAt = Date.now();
-    await db
-      .update(pages)
-      .set({
-        status:        'done',
-        content:       text,
-        contentHash,
-        contentLength: contentLength ?? text.length,
-        processedAt:   now,
-        errorType:     null,
-        errorMsg:      null,
-        processingStartedAt: null,
-        embedding:     newEmbedding,
-      })
-      .where(and(
-        eq(pages.pageId, page.pageId),
-        eq(pages.status, 'processing'),
-      ));
+    await db.transaction(async (tx) => {
+      const completed = await tx
+        .update(pages)
+        .set({
+          status:        'done',
+          content:       text,
+          contentHash,
+          contentLength: contentLength ?? text.length,
+          processedAt:   now,
+          errorType:     null,
+          errorMsg:      null,
+          processingStartedAt: null,
+          embedding:     newEmbedding,
+        })
+        .where(and(
+          eq(pages.pageId, page.pageId),
+          eq(pages.status, 'processing'),
+        ))
+        .returning({ pageId: pages.pageId });
+      if (completed.length > 0) {
+        await tx.insert(processingEvents).values({
+          pageId: page.pageId,
+          completedAt: now,
+          isReprocessing: page.processedAt !== null,
+        });
+      }
+    });
     timing.dbUpdateMs += Date.now() - dbUpdateStartedAt;
     timing.totalMs = Date.now() - pageStartedAt;
 

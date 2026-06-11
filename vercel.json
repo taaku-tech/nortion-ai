@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/process-pages",
-      "schedule": "10 23 * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }

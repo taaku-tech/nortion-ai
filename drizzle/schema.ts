@@ -88,6 +88,21 @@ export const extractions = notionAi.table(
   ],
 );
 
+export const processingEvents = notionAi.table(
+  'processing_events',
+  {
+    id:             serial('id').primaryKey(),
+    pageId:         text('page_id').notNull().references(() => pages.pageId, { onDelete: 'cascade' }),
+    completedAt:    timestamp('completed_at', { withTimezone: true }).notNull(),
+    isReprocessing: boolean('is_reprocessing').notNull(),
+    createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_processing_events_completed_at').on(t.completedAt),
+    uniqueIndex('idx_processing_events_page_completed').on(t.pageId, t.completedAt),
+  ],
+);
+
 export const cronSyncState = notionAi.table(
   'cron_sync_state',
   {
@@ -102,6 +117,7 @@ export const cronSyncState = notionAi.table(
 export type Page       = typeof pages.$inferSelect;
 export type NewPage    = typeof pages.$inferInsert;
 export type Extraction = typeof extractions.$inferSelect;
+export type ProcessingEvent = typeof processingEvents.$inferSelect;
 export type CronSyncState = typeof cronSyncState.$inferSelect;
 
 /** pages.status の許容値 */

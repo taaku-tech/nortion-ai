@@ -73,6 +73,9 @@ export default async function OpsPage() {
         {/* 3. Daily Summary */}
         <section>
           <h2 className="text-lg font-semibold text-gray-700 mb-3">Daily Summary（直近 14 日）</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            doneは該当日に正常完了した処理件数です。再処理は、過去に完了済みのページを再度処理して正常完了した件数です。
+          </p>
           <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-100">
@@ -81,6 +84,7 @@ export default async function OpsPage() {
                   <Th className="text-right">新規取込</Th>
                   <Th className="text-right">処理</Th>
                   <Th className="text-right">done</Th>
+                  <Th className="text-right">再処理</Th>
                   <Th className="text-right">error</Th>
                   <Th className="text-right">retry ⚠</Th>
                   <Th className="text-right">stuck</Th>
@@ -104,6 +108,11 @@ export default async function OpsPage() {
                     <Td className="text-right">
                       {row.done > 0
                         ? <span className="text-green-600">{row.done}</span>
+                        : <span className="text-gray-300">0</span>}
+                    </Td>
+                    <Td className="text-right">
+                      {row.reprocessed > 0
+                        ? <span className="text-blue-600 font-medium">{row.reprocessed}</span>
                         : <span className="text-gray-300">0</span>}
                     </Td>
                     <Td className="text-right">

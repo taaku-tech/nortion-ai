@@ -56,6 +56,8 @@ drizzle/migrations/0004_add_company_name.sql
 drizzle/migrations/0005_add_location_name.sql
 drizzle/migrations/0006_add_embedding.sql
 drizzle/migrations/0007_allow_permanent_error_status.sql
+drizzle/migrations/0008_add_cron_sync_state.sql
+drizzle/migrations/0009_add_processing_events.sql
 ```
 
 > **注意**: `drizzle-kit migrate` は使用しません。手動 SQL 適用で統一しています。
@@ -176,12 +178,13 @@ JST 土日はコード側でスキップされます。
 {
   "crons": [
     { "path": "/api/cron/sync-notion", "schedule": "0 23 * * *" },
-    { "path": "/api/cron/process-pages", "schedule": "10 23 * * *" }
+    { "path": "/api/cron/process-pages", "schedule": "0 0 * * *" }
   ]
 }
 ```
 
-`/api/cron/process-pages` は `/api/cron/sync-notion` の10分後に実行します。Notion同期が重い日でも、同期完了後にAI処理を開始しやすくするためです。
+`/api/cron/process-pages` は次の時間帯となる 00:00 UTC（JST 09:00）に実行します。
+Vercel Hobby の Cron は指定時刻から最大59分遅延する可能性があるため、同期とAI処理の実行時間帯を分離して順序逆転を防ぎます。
 
 Vercel ダッシュボード → **Settings → Cron Jobs** で実行ログを確認できます。
 

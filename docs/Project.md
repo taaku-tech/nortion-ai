@@ -80,7 +80,7 @@
   - `permanent_error` のみでは「一部注意」「対応必要あり」にしない
   - Notion 書き込み失敗時も Cron 本体は 200 成功扱い、Runtime Logs に warning を残す
   - Notion 書き込みは 10 秒 timeout
-- [x] Cron 分離・60秒制限対策
+- [x] Cron 分離・Function 実行時間対策
   - `/api/cron/sync-notion`: Notion DB差分同期・本文キャッシュ保存専用
   - `/api/cron/process-pages`: DB本文キャッシュを使ったGemini抽出・embedding生成専用
   - `/api/cron/extract` は互換endpointとしてsyncのみ実行
@@ -115,7 +115,7 @@
 | 機能 | 状態 |
 |------|------|
 | Notion → Gemini → Supabase パイプライン | ✅ 本番稼働 |
-| Vercel Cron（sync 23:00 UTC / process 23:10 UTC、JST 土日スキップ） | ✅ 設定済み |
+| Vercel Cron（sync 23:00 UTC / process 00:00 UTC、JST 土日スキップ） | ✅ 設定済み |
 | 議事録ページ同期・処理（sync-notion / process-pages 分離） | ✅ |
 | last_edited_time 差分同期・本文キャッシュ | ✅ |
 | extraction retry policy（retryable / non-retryable 分類、message fallback 対応） | ✅ |
@@ -168,7 +168,7 @@
 - **手動 migration**: `drizzle-kit migrate` は使わず Supabase SQL Editor で手動適用
 - **embedding**: 3072次元を `.slice(0, 768)` で切り詰め保存（Matryoshka 方式）。類似検索は未実装
 - **permanent_error**: Notion 404/403/401 等の恒久失敗は `permanent_error` に分類し、retry_count を増やさず次回 cron 対象からも除外する。Retry Warnings の対象外。既知の削除済みページやテストページであれば通常運用上は対応不要
-- **Cron スケジュール**: `/api/cron/sync-notion` は `0 23 * * *`、`/api/cron/process-pages` は `10 23 * * *`。JST 土日はコード側でスキップ（安全装置）
+- **Cron スケジュール**: `/api/cron/sync-notion` は `0 23 * * *`、`/api/cron/process-pages` は `0 0 * * *`。Vercel Hobby の最大59分の実行遅延を考慮して時間帯を分離する。JST 土日はコード側でスキップ（安全装置）
 - **Notion Ops Log**: メール通知ではなく `NOTION_OPS_LOG_PAGE_ID` の専用ページに Cron 完了結果を追記。書き込み失敗時も Cron 本体は失敗させない
 
 ---

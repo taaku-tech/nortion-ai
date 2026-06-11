@@ -1,5 +1,5 @@
 import { or } from 'drizzle-orm';
-import { getDb, pages, extractions, sql, eq, and } from './db';
+import { getDb, pages, extractions, processingEvents, sql, eq, and } from './db';
 
 // ─── Admin: 全体サマリー ──────────────────────────────────────────────────────
 
@@ -402,6 +402,7 @@ export type DailyRow = {
   newlyLoaded:     number;
   processed:       number;
   done:            number;
+  reprocessed:     number;
   errorCount:      number;
   retryWarning:    number;
   stuckProcessing: number;
@@ -415,7 +416,8 @@ export async function getDailySummary(): Promise<DailyRow[]> {
       gs.day::date                                                   AS day,
       coalesce(loaded.newly_loaded,    0)::int                       AS newly_loaded,
       coalesce(proc.processed,         0)::int                       AS processed,
-      coalesce(proc.done,              0)::int                       AS done,
+      coalesce(completed.done,         0)::int                       AS done,
+      coalesce(completed.reprocessed,  0)::int                       AS reprocessed,
       coalesce(proc.error_count,       0)::int                       AS error_count,
       coalesce(proc.retry_warning,     0)::int                       AS retry_warning,
       coalesce(stuck.stuck_processing, 0)::int                       AS stuck_processing,
@@ -433,9 +435,17 @@ export async function getDailySummary(): Promise<DailyRow[]> {
     ) loaded ON loaded.day = gs.day::date
     LEFT JOIN (
       SELECT
+        (completed_at AT TIME ZONE 'Asia/Tokyo')::date AS day,
+        count(*)::int AS done,
+        count(*) FILTER (WHERE is_reprocessing)::int AS reprocessed
+      FROM ${processingEvents}
+      WHERE (completed_at AT TIME ZONE 'Asia/Tokyo')::date >= (NOW() AT TIME ZONE 'Asia/Tokyo')::date - interval '13 days'
+      GROUP BY (completed_at AT TIME ZONE 'Asia/Tokyo')::date
+    ) completed ON completed.day = gs.day::date
+    LEFT JOIN (
+      SELECT
         (processed_at AT TIME ZONE 'Asia/Tokyo')::date                                         AS day,
         count(*)::int                                                                           AS processed,
-        count(*) FILTER (WHERE status = 'done')::int                                           AS done,
         count(*) FILTER (WHERE status IN ('error', 'permanent_error'))::int                    AS error_count,
         count(*) FILTER (WHERE retry_count > 0 AND status != 'permanent_error')::int          AS retry_warning,
         max(processed_at)                                                                       AS last_processed_at
@@ -454,7 +464,7 @@ export async function getDailySummary(): Promise<DailyRow[]> {
   `);
 
   return (rows as unknown as Array<{
-    day: unknown; newly_loaded: unknown; processed: unknown; done: unknown;
+    day: unknown; newly_loaded: unknown; processed: unknown; done: unknown; reprocessed: unknown;
     error_count: unknown; retry_warning: unknown; stuck_processing: unknown;
     last_processed_at: unknown;
   }>).map(r => ({
@@ -462,6 +472,7 @@ export async function getDailySummary(): Promise<DailyRow[]> {
     newlyLoaded:     Number(r.newly_loaded),
     processed:       Number(r.processed),
     done:            Number(r.done),
+    reprocessed:     Number(r.reprocessed),
     errorCount:      Number(r.error_count),
     retryWarning:    Number(r.retry_warning),
     stuckProcessing: Number(r.stuck_processing),

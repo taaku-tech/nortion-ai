@@ -11,7 +11,7 @@ import {
 } from '@/lib/cron/extractWorkflow';
 import { appendProcessOpsLogToNotion } from '@/lib/notion/opsLogWriter';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(req: Request): Promise<Response> {
   const startedAtMs = Date.now();
