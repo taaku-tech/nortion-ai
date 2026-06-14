@@ -119,7 +119,14 @@ export default async function AdminPage() {
                   <p className="text-xs text-gray-500 mb-1 leading-snug line-clamp-2" title={row.companyName}>
                     {row.companyName || '—'}
                   </p>
-                  <p className="text-2xl font-bold text-blue-600">{row.count}</p>
+                  {notion.databaseViewUrl ? (
+                    <a href={notion.databaseViewUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-2xl font-bold text-blue-600 hover:underline">
+                      {row.count}
+                    </a>
+                  ) : (
+                    <p className="text-2xl font-bold text-blue-600">{row.count}</p>
+                  )}
                   {row.latestNotionDate && (
                     <p className="text-xs text-gray-400 mt-1">{row.latestNotionDate}</p>
                   )}
